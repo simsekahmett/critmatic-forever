@@ -1,62 +1,56 @@
 # CritMatic Forever
 
-WoW Forever için kişisel rekor eklentisi. Her büyü için en yüksek kritik, en yüksek normal vuruş ve en yüksek dövüş toplamını hatırlar. Yeni rekoru ekranda, sohbette ve büyü ipucunda gösterir.
+Personal-best tracker for WoW Forever. For each spell it remembers your highest crit, your highest normal hit, and your highest fight total, then shows a new record on screen, in chat, and on the spell tooltip.
 
-Bu, Classic Era'daki CritMatic eklentisinin kopyası değildir. Aynı işi Forever istemcisinde yapmak için sıfırdan yazıldı. Özgün CritMatic'in yazarıyla bağlantısı yoktur ve Blizzard'ın resmi eklentisi değildir.
+Inspired by [InfiniteLoopAlchemist](https://github.com/InfiniteLoopAlchemist)'s CritMatic addon. This project is a separate Forever client addon written from scratch for interface 16001. It is not affiliated with the original author or with Blizzard.
 
-## Forever'da ne çalışır
+## What works on Forever
 
-WoW Forever, Midnight ile aynı arayüz ailesindedir. Eklentiler savaş günlüğünü (`COMBAT_LOG_EVENT_UNFILTERED`) okuyamaz. Tek vuruşun sayısı ve kritik olup olmadığı dövüş sırasında gizli kalır. Bu yüzden kritik rekoru, istemci o günlüğü açmadığı sürece dolmaz. Dinleyici varsayılan olarak kapalıdır; açmak korumalı eylem hatası çıkarabilir.
+WoW Forever uses the same interface family as Midnight. Addons cannot read the combat log (`COMBAT_LOG_EVENT_UNFILTERED`). During a fight the size of a single hit, and whether it crit, stays hidden. Crit records therefore stay empty unless the client allows that event. The listener is off by default. Turning it on can raise a protected-action error.
 
-Dövüş bitince oyunun kendi hasar ölçeri büyü toplamlarını verir. Eklenti bu toplamları **dövüş rekoru** olarak saklar. Bu, bir büyünün o dövüşte yaptığı toplam hasar ya da iyileştirmedir. Tek bir kritik değildir. Arayüzde bu ayrım yazılıdır.
+When combat ends, the built-in damage meter exposes per-spell totals. The addon stores those totals as a **fight best**: the damage or healing that spell did across the whole fight. It is not a single crit. The window says so.
 
-Kritik ve normal vuruş kaydı kodda durur. İstemci savaş günlüğünü tekrar açarsa, Durum sekmesindeki anahtar ile dinleyici denenir ve rekorlar aynı kurallarla dolar.
+Crit and normal-hit recording is still in the code. If the client opens the combat log again, the switch on the Status tab turns the listener on and records fill in under the same rules.
 
-## Kurulum
+## Install
 
-1. `CritMaticForever` klasörünü Forever eklenti dizinine kopyala:
+1. Copy the `CritMaticForever` folder into the Forever addon directory:
 
    `World of Warcraft\_forever_\Interface\AddOns\CritMaticForever`
 
-2. Klasörün içinde `CritMaticForever.toc` olmalı. Oyunu tamamen kapatıp aç. Yeni dosyalar `/reload` ile gelmez.
-3. Karakter seçiminde eklenti listesinden **CritMatic Forever** kutusunu işaretle.
+2. `CritMaticForever.toc` must sit inside that folder. Close the game completely and start it again. New files do not load with `/reload`.
+3. On the character list, enable **CritMatic Forever**.
 
-## Kullanım
+## Use
 
-| Komut | Ne yapar |
+| Command | What it does |
 | --- | --- |
-| `/cmf` veya `/cm` | Ayarlar |
-| `/cmlog` | Kayıt penceresi |
-| `/cmchangelog` | Yenilikler |
-| `/cmf ignore Büyü Adı` | Büyüyü yok say |
-| `/cmf ignoretarget İsim` | Hedefi yok say |
-| `/cmf status` | Dinleyici ve kayıt sayısı |
-| `/cmf demo` | Uyarı önizlemesi |
-| `/cmreset` | Bu karakterin kayıtlarını sil |
+| `/cmf` or `/cm` | Open settings |
+| `/cmlog` | Open the record window |
+| `/cmchangelog` | Open the changelog |
+| `/cmf ignore Spell Name` | Ignore a spell |
+| `/cmf ignoretarget Name` | Ignore a target |
+| `/cmf status` | Listener state and record counts |
+| `/cmf demo` | Preview an alert |
+| `/cmreset` | Delete this character's records |
 
-Minimap düğmesi: sol tık kayıtlar, sağ tık ayarlar, sürükleyerek taşınır.
+Minimap button: left click opens records, right click opens settings, drag moves the button.
 
-Kayıt penceresinde bir satıra sağ tıklayınca o rekor söyle, bağır, grup, raid, lonca veya fısıltı ile paylaşılır. Örneklemeyi oyun, örnek dışında bir donanım olayına (tıklama) bağlar; otomatik emot yok.
+Right-click a row in the record window to share that record through say, yell, party, raid, guild, or whisper. The game only samples a share from a hardware event such as a click. There is no automatic emote.
 
-Büyü kitapçığında, aksiyon çubuğunda ve sohbet bağlantılarında ipucu, o büyünün rekorunu ekler.
+Tooltips on the spellbook, the action bar, and chat links add that spell's records.
 
-## Ayarlar
+## Settings
 
-Genel sekmesinde hasar, iyileştirme, kritik, normal vuruş, pet ve dövüş toplamı ayrı ayrı kapanır. Küçük vuruşlar için bir alt sınır yazılır. Uyarılar hemen ya da dövüş bitince gösterilir. Ses, yazı boyutu ve renkler değişir. Sohbet satırı ile dövüş sonu özeti ayrıdır.
+The General tab turns damage, healing, crits, normal hits, pets, and fight totals on or off separately. A minimum amount drops small hits. Alerts can show immediately or when the fight ends. Sound, text size, and colors are configurable. The chat line and the end-of-fight summary are separate.
 
-## Geliştirme
+## Development
 
-Kayıt kuralları `CritMaticForever/Logic.lua` içindedir ve WoW API'si çağırmaz.
+Record rules live in `CritMaticForever/Logic.lua` and do not call the WoW API.
 
 ```bash
 lua5.1 tests/logic_test.lua
 lua5.1 tests/syntax.lua
 ```
 
-CurseForge'a yüklerken arayüz `16001`, oyun sürümü `1.60.1`, flavor Forever (`gameVersionTypeId` 88568) seçilmeli. Paket, `CritMaticForever` klasörünü içermelidir.
-
-## English
-
-CritMatic Forever remembers, per spell, your highest crit, highest normal hit, and highest fight total. WoW Forever hides the combat log from addons, so crit records stay empty unless the client allows that event. The listener is off by default. After combat, spell totals from the built-in damage meter are stored as a fight best. That number is the whole fight, not one crit.
-
-Copy `CritMaticForever` into `_forever_\Interface\AddOns\` and restart the client. `/cmf` opens settings. `/cmlog` opens the record window.
+For a CurseForge upload, select interface `16001`, game version `1.60.1`, and the Forever flavor. The package must contain the `CritMaticForever` folder. `.pkgmeta` packs that folder, keeps `tests` out of the release, and uses `CHANGELOG.md` as the manual changelog.
