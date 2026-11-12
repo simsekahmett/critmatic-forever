@@ -1,0 +1,20 @@
+name: Package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zip the addon
+        run: |
+          mkdir -p dist
+          zip -r "dist/CritMaticForever-${GITHUB_REF_NAME}.zip" CritMaticForever CHANGELOG.md LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CritMaticForever
+          path: dist/*.zip

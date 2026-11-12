@@ -1,0 +1,12 @@
+package-as: CritMaticForever
+
+ignore:
+  - tests
+  - dist
+  - README.md
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+license-output: LICENSE.txt

@@ -1,0 +1,26 @@
+## Interface: 16001
+## Title: |cffff8010CritMatic|r Forever
+## Notes: Personal-best crits, hits, and fight totals for WoW Forever.
+## Notes-trTR: WoW Forever için kritik, normal vuruş ve dövüş toplamı rekorları.
+## Author: simsekahmett
+## Version: 1.0.0
+## SavedVariables: CritMaticForeverDB
+## SavedVariablesPerCharacter: CritMaticForeverCharDB
+## IconTexture: Interface\AddOns\CritMaticForever\Media\icon
+## Category: Combat
+## X-Category: Combat
+## X-Website: https://github.com/simsekahmett/critmatic-forever
+## DefaultState: enabled
+
+Locale.lua
+Logic.lua
+Client.lua
+Database.lua
+Alerts.lua
+Recorder.lua
+CritLog.lua
+Tooltips.lua
+Options.lua
+Minimap.lua
+Commands.lua
+Init.lua
