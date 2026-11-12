@@ -401,24 +401,16 @@ function ns.Recorder.ScheduleMeterRead()
 	end
 end
 
+-- Registering COMBAT_LOG_EVENT_UNFILTERED is itself a protected action on Forever.
+-- A working Forever addon (XToLevelF) refuses the name before RegisterEvent, because
+-- pcall does not stop the ADDON_ACTION_FORBIDDEN notice.
 function ns.Recorder.SetCombatLog(enabled)
-	ns.Database.Set("attemptCombatLog", enabled and true or false)
-	if not ns.Recorder.combatFrame then
-		return
-	end
+	ns.Database.Set("attemptCombatLog", false)
+	ns.Recorder.combatLogEnabled = false
 	if enabled then
-		local ok, err = pcall(ns.Recorder.combatFrame.RegisterEvent, ns.Recorder.combatFrame, "COMBAT_LOG_EVENT_UNFILTERED")
-		ns.Recorder.combatLogEnabled = ok and true or false
-		ns.Recorder.combatLogError = ok and nil or tostring(err)
-		if ok then
-			ns.Print(ns.L.STATUS_CLEU_ON)
-			ns.Print(ns.L.ATTEMPT_WARN)
-		else
-			ns.Print(string.format(ns.L.STATUS_CLEU_FAILED, tostring(err)))
-		end
+		ns.Recorder.combatLogError = "COMBAT_LOG_EVENT_UNFILTERED"
+		ns.Print(string.format(ns.L.STATUS_CLEU_FAILED, "COMBAT_LOG_EVENT_UNFILTERED"))
 	else
-		pcall(ns.Recorder.combatFrame.UnregisterEvent, ns.Recorder.combatFrame, "COMBAT_LOG_EVENT_UNFILTERED")
-		ns.Recorder.combatLogEnabled = false
 		ns.Recorder.combatLogError = nil
 		ns.Print(ns.L.STATUS_CLEU_OFF)
 	end
@@ -429,13 +421,9 @@ function ns.Recorder.Init()
 	ns.Recorder.combatFrame:SetScript("OnEvent", function()
 		ns.Recorder.OnCombatLog()
 	end)
-	if ns.Database.Get("attemptCombatLog") then
-		local ok, err = pcall(ns.Recorder.combatFrame.RegisterEvent, ns.Recorder.combatFrame, "COMBAT_LOG_EVENT_UNFILTERED")
-		ns.Recorder.combatLogEnabled = ok and true or false
-		ns.Recorder.combatLogError = ok and nil or tostring(err)
-	else
-		ns.Recorder.combatLogEnabled = false
-	end
+	ns.Database.Set("attemptCombatLog", false)
+	ns.Recorder.combatLogEnabled = false
+	ns.Recorder.combatLogError = nil
 
 	local meter = CreateFrame("Frame")
 	ns.Recorder.meterFrame = meter

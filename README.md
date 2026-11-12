@@ -6,11 +6,9 @@ Inspired by [InfiniteLoopAlchemist](https://github.com/InfiniteLoopAlchemist)'s 
 
 ## What works on Forever
 
-WoW Forever uses the same interface family as Midnight. Addons cannot read the combat log (`COMBAT_LOG_EVENT_UNFILTERED`). During a fight the size of a single hit, and whether it crit, stays hidden. Crit records therefore stay empty unless the client allows that event. The listener is off by default. Turning it on can raise a protected-action error.
+WoW Forever uses the same interface family as Midnight. Addons cannot register the combat log (`COMBAT_LOG_EVENT_UNFILTERED`). Registering that event is a protected action, so this addon never calls it. During a fight the size of a single hit, and whether it crit, stays hidden. Crit records stay empty for that reason.
 
-When combat ends, the built-in damage meter exposes per-spell totals. The addon stores those totals as a **fight best**: the damage or healing that spell did across the whole fight. It is not a single crit. The window says so.
-
-Crit and normal-hit recording is still in the code. If the client opens the combat log again, the switch on the Status tab turns the listener on and records fill in under the same rules.
+When combat ends, the built-in damage meter exposes per-spell totals through `C_DamageMeter.GetCombatSessionSourceFromType`. The addon reads the current session and, if that is empty, the expired session. It stores those totals as a **fight best**: the damage or healing that spell did across the whole fight. It is not a single crit. The window says so. Overall session totals are not used, because those cover more than one fight.
 
 ## Install
 

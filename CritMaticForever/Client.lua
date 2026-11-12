@@ -7,24 +7,45 @@ function ns.WidgetName(prefix)
 	return "CritMaticForever" .. (prefix or "Widget") .. widgetSerial
 end
 
-function ns.ValueIsSecret(value)
-	if type(issecretvalue) == "function" and issecretvalue(value) then
-		return true
+-- Same order as other Forever addons: canaccessvalue first, then the secret
+-- predicates, each inside pcall. A raw call can itself raise on a restricted value.
+local function ValueIsRestricted(value)
+	if type(canaccessvalue) == "function" then
+		local ok, accessible = pcall(canaccessvalue, value)
+		if ok then
+			return not accessible
+		end
+	end
+	if type(issecretvalue) == "function" then
+		local ok, secret = pcall(issecretvalue, value)
+		if ok and secret then
+			return true
+		end
+	end
+	if type(value) == "table" and type(issecrettable) == "function" then
+		local ok, secretTable = pcall(issecrettable, value)
+		if ok and secretTable then
+			return true
+		end
+	end
+	if type(value) == "table" and type(canaccesstable) == "function" then
+		local ok, accessible = pcall(canaccesstable, value)
+		if ok then
+			return not accessible
+		end
 	end
 	return false
+end
+
+function ns.ValueIsSecret(value)
+	return ValueIsRestricted(value)
 end
 
 function ns.TableIsSecret(value)
 	if type(value) ~= "table" then
 		return false
 	end
-	if type(issecrettable) == "function" and issecrettable(value) then
-		return true
-	end
-	if type(canaccesstable) == "function" and not canaccesstable(value) then
-		return true
-	end
-	return false
+	return ValueIsRestricted(value)
 end
 
 function ns.PlainString(value)
