@@ -109,24 +109,6 @@ local chatLines, castLines = 0, 0
 local MAX_CHAT, MAX_CAST = 8, 4
 local hookedChat = {}
 
-local function CombatLogFrames()
-	local frames = {}
-	if type(COMBATLOG) == "table" then
-		frames[#frames + 1] = COMBATLOG
-	end
-	local count = NUM_CHAT_WINDOWS or 10
-	for index = 1, count do
-		local chat = _G["ChatFrame" .. index]
-		if chat and type(GetChatWindowInfo) == "function" then
-			local ok, name = pcall(GetChatWindowInfo, index)
-			if ok and type(name) == "string" and not ns.ValueIsSecret(name) and (name == COMBAT_LOG or name == "Combat Log") then
-				frames[#frames + 1] = chat
-			end
-		end
-	end
-	return frames
-end
-
 local function DescribeText(text)
 	if text == nil then
 		return "nil"
@@ -138,6 +120,42 @@ local function DescribeText(text)
 		return type(text)
 	end
 	return '"' .. text:sub(1, 140) .. '"'
+end
+
+local function CombatLogFrames()
+	local frames = {}
+	if type(COMBATLOG) == "table" then
+		frames[#frames + 1] = COMBATLOG
+	end
+	local count = NUM_CHAT_WINDOWS or 10
+	for index = 1, count do
+		local chat = _G["ChatFrame" .. index]
+		if chat and chat ~= COMBATLOG and type(GetChatWindowInfo) == "function" then
+			local ok, name = pcall(GetChatWindowInfo, index)
+			if ok and type(name) == "string" and not ns.ValueIsSecret(name) and (name == COMBAT_LOG or name == "Combat Log") then
+				frames[#frames + 1] = chat
+			end
+		end
+	end
+	return frames
+end
+
+-- The newest lines stored in the Combat Log tab, read back from the frame itself.
+-- Combat lines do not pass through AddMessage, so this is the test that matters.
+local function ReadRecentLines(tag, wanted)
+	for _, chat in ipairs(CombatLogFrames()) do
+		if chat.GetNumMessages and chat.GetMessageInfo then
+			local okCount, count = pcall(chat.GetNumMessages, chat)
+			if not okCount or type(count) ~= "number" or ns.ValueIsSecret(count) then
+				Say(tag .. " lines=" .. (okCount and Show(count) or "error"))
+			else
+				for index = math.max(1, count - wanted + 1), count do
+					local okInfo, text = pcall(chat.GetMessageInfo, chat, index)
+					Say(string.format("%s [%d/%d] %s", tag, index, count, okInfo and DescribeText(text) or ("error " .. tostring(text))))
+				end
+			end
+		end
+	end
 end
 
 local function WatchCombatLogChat()
@@ -186,13 +204,18 @@ local function OnCast(unit, castGUID, spellID)
 		Show(unit), Show(spellID), name or "?", ns.ValueIsSecret(castGUID) and "<secret>" or "readable"))
 end
 
+-- On a hit to the target, look at the newest Combat Log line right away: if it is
+-- readable here, a record can be judged the moment the hit lands.
 local function OnUnitCombat(unit, action, flag, amount, school)
 	if lines >= MAX_LINES then
 		return
 	end
+	if ns.ValueIsSecret(unit) or ns.ValueIsSecret(action) or unit ~= "target" or action ~= "WOUND" then
+		return
+	end
 	lines = lines + 1
-	Say(string.format("UNIT_COMBAT unit=%s action=%s flag=%s amount=%s (%s) school=%s",
-		Show(unit), Show(action), Show(flag), Show(amount), ns.ValueIsSecret(amount) and "secret" or type(amount), Show(school)))
+	Say(string.format("hit on target flag=%s, newest combat log line now:", Show(flag)))
+	ReadRecentLines("  live", 1)
 end
 
 function ns.Probe.Run()
@@ -224,8 +247,10 @@ function ns.Probe.Run()
 				-- The meter fills in a moment after combat. Read it then, once per fight.
 				if C_Timer and C_Timer.After then
 					C_Timer.After(1.5, function()
-						Say("combat ended, meter after the fight:")
-						ns.Guard("Probe", MeterShape)
+						Say("combat ended, last Combat Log lines:")
+						ns.Guard("Probe", function()
+							ReadRecentLines("  after", 6)
+						end)
 					end)
 				end
 				return
