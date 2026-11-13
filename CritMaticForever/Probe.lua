@@ -249,6 +249,35 @@ local function WatchBackfill()
 	end
 end
 
+-- The fight's lines show up in the tab only once the tab is opened. Opening it calls
+-- C_CombatLog.RefilterEntries. Call it ourselves and see whether the lines land in the
+-- frame without the tab being shown.
+function ns.Probe.Refilter()
+	local chat = CombatLogFrames()[1]
+	if not chat then
+		Say("refilter: no Combat Log tab")
+		return
+	end
+	if not C_CombatLog or type(C_CombatLog.RefilterEntries) ~= "function" then
+		Say("refilter: C_CombatLog.RefilterEntries missing")
+		return
+	end
+	local okBefore, before = pcall(chat.GetNumMessages, chat)
+	local ok, err = pcall(C_CombatLog.RefilterEntries)
+	Say(string.format("refilter: call ok=%s%s, lines before=%s, tabVisible=%s", tostring(ok),
+		ok and "" or (" err=" .. tostring(err)), okBefore and Show(before) or "error", Show(chat:IsVisible())))
+	local function report()
+		local okAfter, after = pcall(chat.GetNumMessages, chat)
+		Say("refilter: lines after=" .. (okAfter and Show(after) or "error"))
+		ReadRecentLines("  refilter", 6)
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.5, report)
+	else
+		report()
+	end
+end
+
 local function OnCast(unit, castGUID, spellID)
 	if castLines >= MAX_CAST then
 		return
@@ -304,8 +333,13 @@ function ns.Probe.Run()
 			if event == "PLAYER_REGEN_ENABLED" then
 				ns.Guard("Probe", function()
 					LogState("combat ended:")
-					WatchBackfill()
 				end)
+				-- Give the client a moment after combat, then ask it to fill the tab.
+				if C_Timer and C_Timer.After then
+					C_Timer.After(2, function()
+						ns.Guard("Probe", ns.Probe.Refilter)
+					end)
+				end
 				return
 			end
 			ns.Guard("Probe", function()

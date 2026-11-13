@@ -129,7 +129,11 @@ function ns.Commands.Handle(message)
 	elseif command == "status" then
 		ns.Commands.Status()
 	elseif command == "probe" then
-		ns.Probe.Run()
+		if rest:lower() == "refilter" then
+			ns.Probe.Refilter()
+		else
+			ns.Probe.Run()
+		end
 	else
 		ns.Print(ns.L.UNKNOWN)
 	end
