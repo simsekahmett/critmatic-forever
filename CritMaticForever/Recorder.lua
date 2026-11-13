@@ -338,6 +338,11 @@ function ns.Recorder.ReadCombatLogTab(done)
 			done()
 		end
 	end
+	-- One read at a time. A read already under way covers the same lines.
+	if ns.Recorder.tabReading then
+		finish()
+		return
+	end
 	local chat = ns.Recorder.CombatLogFrame()
 	if not chat or not C_CombatLog or type(C_CombatLog.RefilterEntries) ~= "function" then
 		if not ns.Recorder.toldNoTab then
@@ -351,7 +356,10 @@ function ns.Recorder.ReadCombatLogTab(done)
 		finish()
 		return
 	end
+	ns.Recorder.tabReading = true
+	ns.Recorder.lastTabRead = GetTime and GetTime() or 0
 	local function harvest()
+		ns.Recorder.tabReading = false
 		ns.Guard("CombatLogTab", function()
 			local okCount, count = pcall(chat.GetNumMessages, chat)
 			if not okCount or type(count) ~= "number" or ns.ValueIsSecret(count) then
@@ -382,11 +390,44 @@ function ns.Recorder.ReadCombatLogTab(done)
 		end
 		finish()
 	end
-	-- The tab fills on the next frame.
+	-- The tab fills newest lines first, then backfills older ones above them.
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.3, harvest)
 	else
 		harvest()
+	end
+end
+
+-- During combat the tab gets no new lines by itself, but a refill does bring the
+-- current fight's hits. Each hit asks for a read; reads run at most once a second,
+-- so a record shows up about a second after the hit.
+local LIVE_INTERVAL = 1.0
+
+function ns.Recorder.RequestLiveRead()
+	if ns.Recorder.liveQueued or not (C_Timer and C_Timer.After) then
+		return
+	end
+	ns.Recorder.liveQueued = true
+	local now = GetTime and GetTime() or 0
+	local wait = LIVE_INTERVAL - (now - (ns.Recorder.lastTabRead or 0))
+	if wait < 0.2 then
+		wait = 0.2
+	end
+	C_Timer.After(wait, function()
+		ns.Recorder.liveQueued = false
+		ns.Guard("CombatLogTab", function()
+			ns.Recorder.ReadCombatLogTab()
+		end)
+	end)
+end
+
+local function OnUnitCombat(unit, action)
+	if ns.ValueIsSecret(unit) or ns.ValueIsSecret(action) then
+		return
+	end
+	-- Your hits land on the target; your heals usually land on you.
+	if (unit == "target" and action == "WOUND") or (unit == "player" and action == "HEAL") then
+		ns.Recorder.RequestLiveRead()
 	end
 end
 
@@ -615,6 +656,13 @@ function ns.Recorder.Init()
 			ns.Recorder.ScheduleMeterRead()
 		end
 	end)
+	local live = CreateFrame("Frame")
+	ns.Recorder.liveFrame = live
+	live:SetScript("OnEvent", function(_, _, unit, action)
+		OnUnitCombat(unit, action)
+	end)
+	pcall(live.RegisterEvent, live, "UNIT_COMBAT")
+
 	meter:RegisterEvent("PLAYER_REGEN_DISABLED")
 	meter:RegisterEvent("PLAYER_REGEN_ENABLED")
 	pcall(meter.RegisterEvent, meter, "DAMAGE_METER_COMBAT_SESSION_UPDATED")

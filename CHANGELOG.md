@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Single-hit and crit records per spell are back. After each fight the addon refills the Combat Log chat tab and reads your hits from it. Records are announced right after the fight. Needs a Combat Log tab and the English client.
+- Single-hit and crit records per spell are back. The addon refills the Combat Log chat tab after your hits (at most once a second) and reads them from it, so a record is announced about a second after the hit. Needs a Combat Log tab and the English client.
 - Fight totals are no longer announced as a "new best" by default; they stay in the Fight tab.
 - `/cmf probe` shows what the client exposes, for troubleshooting.
 - Fight bests: when the current meter session was still hidden, the addon fell back to the older Expired session, saved that fight's totals and stopped retrying. It now waits for the real numbers.
