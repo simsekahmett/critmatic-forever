@@ -24,7 +24,7 @@ function ns.Database.DefaultSettings()
 		trackHit = true,
 		trackPet = true,
 		trackFight = true,
-		alertFight = true,
+		alertFight = false,
 		countOverheal = true,
 		minimumAmount = 0,
 		tooltip = true,
@@ -80,6 +80,12 @@ function ns.Database.Init()
 		minimapAngle = 210,
 	})
 	Merge(ns.account.settings, ns.Database.DefaultSettings())
+	-- Single hits now come from the Combat Log tab. A fight total announced as a
+	-- "new best" reads like a single hit, so that announcement starts off once.
+	if not ns.account.fightAlertDefaulted then
+		ns.account.fightAlertDefaulted = true
+		ns.account.settings.alertFight = false
+	end
 
 	-- Until the character is known, records go to a scratch table that BindCharacter
 	-- folds into the real slot.

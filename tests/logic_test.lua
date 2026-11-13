@@ -154,6 +154,46 @@ eq(sameFight.fight, 6400, "same fight total not lowered")
 local _, nextFight = Logic.ApplyFightTotal(sameFight, 7000, 5, "damage", "f3")
 eq(nextFight.previous, 6400, "next fight compares to full total")
 
+-- Combat Log tab lines.
+local claw = Logic.ParseCombatLine("Your Claw hit Saltstone Crystalhide 252 Physical. (Critical) ")
+eq(claw.kind, "damage", "line damage kind")
+eq(claw.spellName, "Claw", "line spell")
+eq(claw.target, "Saltstone Crystalhide", "line target")
+eq(claw.amount, 252, "line amount")
+eq(claw.isCrit, true, "line crit")
+eq(claw.spellID, nil, "line without link has no id")
+
+local bite = Logic.ParseCombatLine("Your Ferocious Bite hit Saltstone Crystalhide 137 Physical. (108 Overkill) ")
+eq(bite.spellName, "Ferocious Bite", "multi-word spell")
+eq(bite.amount, 137, "overkill line amount")
+eq(bite.isCrit, false, "overkill line not crit")
+
+local melee = Logic.ParseCombatLine("Your Melee hit Saltstone Crystalhide 37 Physical. (1 Blocked) ")
+eq(melee.spellID, 6603, "melee maps to auto attack")
+
+local regrowth = Logic.ParseCombatLine("Your |cff888888healed|r You 0 Nature. (43 Overhealed) ")
+eq(regrowth, nil, "line without spell name is ignored")
+local healCrit = Logic.ParseCombatLine("Your Regrowth |cff888888healed|r You 65 Nature. (12 Overhealed) (Critical)")
+eq(healCrit.kind, "heal", "heal kind from colored verb")
+eq(healCrit.amount, 65, "heal amount")
+eq(healCrit.over, 12, "heal overheal")
+eq(healCrit.isCrit, true, "heal crit")
+
+local linked = Logic.ParseCombatLine("Your |Hspell:3029:0|h[Claw]|h hit |Hunit:Creature-0-1|hBoar|h 1,234 Physical.")
+eq(linked.spellID, 3029, "spell id from link")
+eq(linked.spellName, "Claw", "link stripped from name")
+eq(linked.target, "Boar", "unit link stripped")
+eq(linked.amount, 1234, "grouped digits")
+
+eq(Logic.ParseCombatLine("You killed Saltstone Crystalhide."), nil, "kill line ignored")
+eq(Logic.ParseCombatLine("Scorpid Terror dies, you gain 197 experience."), nil, "xp line ignored")
+
+local seen = { "a", "b", "c", "d" }
+eq(Logic.ResumeIndex({ "a", "b", "c", "d", "e", "f" }, Logic.Tail(seen, 2)), 5, "resume after tail")
+eq(Logic.ResumeIndex({ "x", "y" }, { "c", "d" }), 1, "tail missing reads all")
+eq(Logic.ResumeIndex({ "c", "d", "c", "d", "e" }, { "c", "d" }), 3, "earliest tail match")
+eq(#Logic.Tail({ "a", "b", "c" }, 5), 3, "short tail")
+
 local entries = {
 	{ name = "Frostbolt", left = 10, right = 5 },
 	{ name = "Fireball", left = 50, right = 1 },

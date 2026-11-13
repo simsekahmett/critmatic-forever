@@ -6,9 +6,19 @@ Inspired by [InfiniteLoopAlchemist](https://github.com/InfiniteLoopAlchemist)'s 
 
 ## What works on Forever
 
-WoW Forever uses the same interface family as Midnight. Addons cannot register the combat log (`COMBAT_LOG_EVENT_UNFILTERED`). Registering that event is a protected action, so this addon never calls it. During a fight the size of a single hit, and whether it crit, stays hidden. Crit records stay empty for that reason.
+WoW Forever uses the same interface family as Midnight. Addons cannot register the combat log (`COMBAT_LOG_EVENT_UNFILTERED`). Registering that event is a protected action, so this addon never calls it. During a fight, hit amounts reach addons only as secret values (`UNIT_COMBAT`), which can be shown but not compared, and the damage meter totals are secret too.
 
-When combat ends, the built-in damage meter exposes per-spell totals through `C_DamageMeter.GetCombatSessionSourceFromType`. The addon reads the current session and, if that is empty, the expired session. It stores those totals as a **fight best**: the damage or healing that spell did across the whole fight. It is not a single crit. The window says so. Overall session totals are not used, because those cover more than one fight.
+**Single hits and crits.** The client's own Combat Log chat tab still lists every hit, for example `Your Claw hit Saltstone Crystalhide 252 Physical. (Critical)`. When combat ends, the addon calls `C_CombatLog.RefilterEntries()` so the tab is rebuilt even while it is not shown, reads the lines back as plain text, and keeps each spell's biggest normal hit and biggest crit (heals too). New records are announced right after the fight, not at the moment of the hit; during combat the tab does not receive new lines. This needs:
+
+- a Combat Log chat tab (the default second tab; otherwise right-click a chat tab > New Window > Combat Log),
+- the English client, because the lines are parsed in English,
+- the tab's filter to include your own hits (the default does).
+
+Pet hits are not read from the tab yet.
+
+**Fight totals.** The built-in damage meter exposes per-spell totals after combat through `C_DamageMeter.GetCombatSessionSourceFromType`. The addon stores them as a **fight best** in the Fight tab: the damage or healing a spell did across the whole fight. That is not a single hit, so it is not announced unless *Alert when a fight total beats your previous best* is on.
+
+`/cmf probe` prints what this client exposes (meter fields, `UNIT_COMBAT`, Combat Log tab lines) for troubleshooting.
 
 ## Install
 

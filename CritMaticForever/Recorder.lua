@@ -97,6 +97,10 @@ function ns.Recorder.Celebrate(record, outcome)
 	if not outcome or outcome.silent then
 		return
 	end
+	-- Fight totals are kept and shown in the Fight tab; they are announced only on request.
+	if outcome.field == "fight" and not ns.Database.Get("alertFight") then
+		return
+	end
 	local payload = ns.Recorder.BuildPayload(record, outcome)
 	local defer = ns.Database.Get("alertTiming") == "combatend" and ns.Recorder.inCombat
 	if defer then
@@ -221,36 +225,169 @@ function ns.Recorder.HandleEvent(subevent, sourceGUID, sourceFlags, destName, ..
 		described.spellName = nil
 	end
 	local name, icon = ResolveSpell(described)
-	if ns.Database.IsIgnoredSpell(described.spellID, name or spellName) then
-		return
-	end
-	local target = ns.PlainString(destName)
-	if target and ns.Database.IsIgnoredTarget(target) then
-		return
-	end
-
-	local key = ns.Logic.RecordKey(described.spellID, who == "pet")
-	local existing = ns.char.records[key]
-	local scratch = existing and BucketFor(existing, described.kind) or ns.Logic.NewBucket()
-	local _, outcome = ns.Logic.ApplyHit(scratch, {
+	ns.Recorder.RecordHit({
+		spellID = described.spellID,
+		isPet = who == "pet",
 		kind = described.kind,
 		isCrit = described.critical,
 		amount = described.amount,
 		over = described.over,
-		target = target,
-		now = ns.Now(),
-	}, ns.Database.Settings())
-	local kept = (scratch.crit or 0) > 0 or (scratch.hit or 0) > 0 or (scratch.critCount or 0) > 0 or (scratch.hitCount or 0) > 0
-	if not existing and not kept then
+		target = ns.PlainString(destName),
+		name = name or spellName,
+		icon = icon,
+	})
+end
+
+-- One hit from any source: the combat log event, or a Combat Log tab line.
+function ns.Recorder.RecordHit(hit)
+	if ns.Database.IsIgnoredSpell(hit.spellID, hit.name) then
 		return
 	end
-	local record = ns.Database.EnsureRecord(described.spellID, who == "pet", name, icon)
-	if described.kind == "heal" then
+	if hit.target and ns.Database.IsIgnoredTarget(hit.target) then
+		return
+	end
+	local key = ns.Logic.RecordKey(hit.spellID, hit.isPet)
+	local existing = ns.char.records[key]
+	local scratch = existing and BucketFor(existing, hit.kind) or ns.Logic.NewBucket()
+	local _, outcome = ns.Logic.ApplyHit(scratch, {
+		kind = hit.kind,
+		isCrit = hit.isCrit,
+		amount = hit.amount,
+		over = hit.over,
+		target = hit.target,
+		now = ns.Now(),
+	}, ns.Database.Settings())
+	if not existing and not outcome then
+		return
+	end
+	local record = ns.Database.EnsureRecord(hit.spellID, hit.isPet, hit.name, hit.icon)
+	if hit.kind == "heal" then
 		record.heal = scratch
 	else
 		record.damage = scratch
 	end
 	ns.Recorder.Celebrate(record, outcome)
+end
+
+-- Combat Log tab --------------------------------------------------------------
+
+local TAIL_SIZE = 4
+
+function ns.Recorder.CombatLogFrame()
+	if type(COMBATLOG) == "table" and COMBATLOG.GetNumMessages then
+		return COMBATLOG
+	end
+	if type(GetChatWindowInfo) ~= "function" then
+		return nil
+	end
+	for index = 1, NUM_CHAT_WINDOWS or 10 do
+		local chat = _G["ChatFrame" .. index]
+		local ok, name = pcall(GetChatWindowInfo, index)
+		if chat and ok and type(name) == "string" and not ns.ValueIsSecret(name) and (name == COMBAT_LOG or name == "Combat Log") then
+			return chat
+		end
+	end
+	return nil
+end
+
+local function SpellFromName(name)
+	if type(name) ~= "string" or not C_Spell or type(C_Spell.GetSpellInfo) ~= "function" then
+		return nil
+	end
+	local ok, info = pcall(C_Spell.GetSpellInfo, name)
+	if ok and type(info) == "table" and not ns.TableIsSecret(info) then
+		local spellID = info.spellID
+		if type(spellID) == "number" and not ns.ValueIsSecret(spellID) then
+			return spellID
+		end
+	end
+	return nil
+end
+
+local function ApplyLine(raw)
+	local parsed = ns.Logic.ParseCombatLine(raw)
+	if not parsed then
+		return false
+	end
+	local spellID = parsed.spellID or SpellFromName(parsed.spellName)
+	if not spellID then
+		ns.Recorder.unresolved = (ns.Recorder.unresolved or 0) + 1
+		return false
+	end
+	local name, icon = ns.SpellInfo(spellID)
+	ns.Recorder.RecordHit({
+		spellID = spellID,
+		isPet = false,
+		kind = parsed.kind,
+		isCrit = parsed.isCrit,
+		amount = parsed.amount,
+		over = parsed.over,
+		target = parsed.target,
+		name = name or parsed.spellName,
+		icon = icon,
+	})
+	return true
+end
+
+-- Forever keeps hit numbers secret for addons, but the client's Combat Log tab can be
+-- refilled after combat and its lines read back as plain text. RefilterEntries
+-- rebuilds the tab from the start, so only lines after the last seen tail count.
+function ns.Recorder.ReadCombatLogTab(done)
+	local function finish()
+		if done then
+			done()
+		end
+	end
+	local chat = ns.Recorder.CombatLogFrame()
+	if not chat or not C_CombatLog or type(C_CombatLog.RefilterEntries) ~= "function" then
+		if not ns.Recorder.toldNoTab then
+			ns.Recorder.toldNoTab = true
+			ns.Print(ns.L.LOGTAB_MISSING)
+		end
+		finish()
+		return
+	end
+	if not pcall(C_CombatLog.RefilterEntries) then
+		finish()
+		return
+	end
+	local function harvest()
+		ns.Guard("CombatLogTab", function()
+			local okCount, count = pcall(chat.GetNumMessages, chat)
+			if not okCount or type(count) ~= "number" or ns.ValueIsSecret(count) then
+				return
+			end
+			local raws, cleaned = {}, {}
+			for index = 1, count do
+				local okInfo, text = pcall(chat.GetMessageInfo, chat, index)
+				if okInfo and type(text) == "string" and not ns.ValueIsSecret(text) then
+					raws[#raws + 1] = text
+					cleaned[#cleaned + 1] = ns.Logic.CleanCombatLine(text)
+				end
+			end
+			local applied = 0
+			for index = ns.Logic.ResumeIndex(cleaned, ns.Recorder.logTail), #raws do
+				if ApplyLine(raws[index]) then
+					applied = applied + 1
+				end
+			end
+			if #cleaned > 0 then
+				ns.Recorder.logTail = ns.Logic.Tail(cleaned, TAIL_SIZE)
+			end
+			ns.Recorder.logTabHits = applied
+			ns.Recorder.logTabRead = ns.Now()
+		end)
+		if ns.CritLog and ns.CritLog.IsShown and ns.CritLog.IsShown() then
+			ns.CritLog.Refresh()
+		end
+		finish()
+	end
+	-- The tab fills on the next frame.
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.3, harvest)
+	else
+		harvest()
+	end
 end
 
 function ns.Recorder.OnCombatLog()
@@ -405,10 +542,13 @@ function ns.Recorder.ScheduleMeterRead(withSummary)
 	end
 	local tries = 0
 	local function finish()
-		if ns.Recorder.summaryPending then
-			ns.Recorder.summaryPending = false
-			ns.Recorder.PrintSummary()
-		end
+		-- Single hits from the Combat Log tab, then the summary that covers both.
+		ns.Recorder.ReadCombatLogTab(function()
+			if ns.Recorder.summaryPending then
+				ns.Recorder.summaryPending = false
+				ns.Recorder.PrintSummary()
+			end
+		end)
 	end
 	local function tick()
 		if serial ~= readSerial then

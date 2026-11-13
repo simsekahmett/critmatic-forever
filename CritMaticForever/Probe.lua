@@ -303,6 +303,11 @@ local function OnUnitCombat(unit, action, flag, amount, school)
 	end
 	Say(string.format("hit on target flag=%s, newest combat log line now:", Show(flag)))
 	ReadRecentLines("  live", 1)
+	-- Does a refill work mid-fight? If so, records can come a moment after each hit.
+	if lines == 3 then
+		Say("in-combat refilter test:")
+		ns.Probe.Refilter()
+	end
 end
 
 function ns.Probe.Run()

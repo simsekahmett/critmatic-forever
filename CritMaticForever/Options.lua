@@ -261,6 +261,11 @@ function ns.Options.RefreshStatus()
 	else
 		lines[#lines + 1] = ns.L.STATUS_CLEU_OFF
 	end
+	if ns.Recorder.logTabRead then
+		lines[#lines + 1] = string.format(ns.L.LOGTAB_READ, ns.Recorder.logTabHits or 0)
+	elseif not ns.Recorder.CombatLogFrame() then
+		lines[#lines + 1] = ns.L.LOGTAB_MISSING
+	end
 	if ns.Recorder.hidden and ns.Recorder.hidden > 0 then
 		lines[#lines + 1] = string.format(ns.L.HIDDEN_HITS, ns.Recorder.hidden)
 	end

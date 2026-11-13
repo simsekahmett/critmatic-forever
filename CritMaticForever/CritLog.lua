@@ -410,6 +410,8 @@ function ns.CritLog.Refresh()
 	local status
 	if ns.Recorder.combatLogEnabled then
 		status = L.STATUS_CLEU_ON
+	elseif ns.Recorder.logTabRead then
+		status = string.format(L.LOGTAB_READ, ns.Recorder.logTabHits or 0)
 	else
 		status = L.STATUS_CLEU_OFF
 	end

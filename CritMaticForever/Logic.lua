@@ -294,6 +294,111 @@ function Logic.ApplyFightTotal(bucket, total, now, kind, fightID)
 	}
 end
 
+-- Combat Log chat tab lines. Forever keeps hit numbers secret for addons, but the
+-- client's own Combat Log tab, filled through C_CombatLog.RefilterEntries after combat,
+-- hands its lines over as plain text:
+--   "Your Claw hit Saltstone Crystalhide 252 Physical. (Critical)"
+--   "Your Regrowth healed You 65 Nature. (43 Overhealed) (Critical)"
+-- Names may be wrapped in links and colors. Only the English line format is known.
+
+function Logic.CleanCombatLine(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local clean = text
+		:gsub("|c%x%x%x%x%x%x%x%x", "")
+		:gsub("|r", "")
+		:gsub("|H.-|h", "")
+		:gsub("|h", "")
+		:gsub("[%[%]]", "")
+		:gsub("%s+", " ")
+		:gsub("^ ", "")
+		:gsub(" $", "")
+	return clean
+end
+
+local function ToNumber(digits)
+	if type(digits) ~= "string" then
+		return nil
+	end
+	return tonumber((digits:gsub(",", "")))
+end
+
+function Logic.ParseCombatLine(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local linkedID = tonumber(text:match("|Hspell:(%d+)") or "")
+	local clean = Logic.CleanCombatLine(text)
+	local kind = "damage"
+	local spell, target, digits, school, rest = clean:match("^Your (.-) hit (.-) ([%d,]+) (%a+)%.(.*)$")
+	if not spell then
+		kind = "heal"
+		spell, target, digits, school, rest = clean:match("^Your (.-) healed (.-) ([%d,]+) (%a+)%.(.*)$")
+	end
+	if not spell then
+		return nil
+	end
+	local amount = ToNumber(digits)
+	if not amount then
+		return nil
+	end
+	rest = rest or ""
+	local over
+	if kind == "heal" then
+		over = ToNumber(rest:match("%(([%d,]+) Overhealed%)"))
+	end
+	local spellID = linkedID
+	if not spellID and spell == "Melee" then
+		spellID = AUTO_ATTACK
+	end
+	return {
+		kind = kind,
+		spellID = spellID,
+		spellName = spell,
+		target = target,
+		amount = amount,
+		over = over,
+		school = school,
+		isCrit = rest:find("(Critical)", 1, true) ~= nil,
+	}
+end
+
+-- RefilterEntries rebuilds the whole tab, so lines already seen come back. tail holds
+-- the last lines handled before. Returns the index of the first line after the
+-- earliest place that tail appears, or 1 when it is not found. The earliest match
+-- loses the fewest new lines if the same run of lines repeats later.
+function Logic.ResumeIndex(lines, tail)
+	if type(lines) ~= "table" or type(tail) ~= "table" or #tail == 0 then
+		return 1
+	end
+	local size = #tail
+	for last = size, #lines do
+		local match = true
+		for offset = 0, size - 1 do
+			if lines[last - offset] ~= tail[size - offset] then
+				match = false
+				break
+			end
+		end
+		if match then
+			return last + 1
+		end
+	end
+	return 1
+end
+
+function Logic.Tail(lines, size)
+	local tail = {}
+	if type(lines) ~= "table" then
+		return tail
+	end
+	for index = math.max(1, #lines - size + 1), #lines do
+		tail[#tail + 1] = lines[index]
+	end
+	return tail
+end
+
 function Logic.SortEntries(entries, key, descending)
 	table.sort(entries, function(a, b)
 		local av = a[key]
