@@ -194,6 +194,61 @@ local function WatchCombatLogChat()
 	end
 end
 
+local function LogState(tag)
+	local restricted = "n/a"
+	if C_CombatLog and type(C_CombatLog.IsCombatLogRestricted) == "function" then
+		local ok, value = pcall(C_CombatLog.IsCombatLogRestricted)
+		restricted = ok and Show(value) or "error"
+	end
+	local filtered = "n/a"
+	if C_CombatLog and type(C_CombatLog.AreFilteredEventsEnabled) == "function" then
+		local ok, value = pcall(C_CombatLog.AreFilteredEventsEnabled)
+		filtered = ok and Show(value) or "error"
+	end
+	for _, chat in ipairs(CombatLogFrames()) do
+		local okCount, count = pcall(chat.GetNumMessages, chat)
+		Say(string.format("%s restricted=%s filteredEvents=%s tabVisible=%s lines=%s", tag, restricted, filtered,
+			Show(chat:IsVisible()), okCount and Show(count) or "error"))
+	end
+end
+
+-- After combat, watch the tab for 20 s and print lines as they arrive, to see when
+-- the fight's hit lines are written and whether that needs the tab to be open.
+local function WatchBackfill()
+	local chat = CombatLogFrames()[1]
+	if not chat then
+		return
+	end
+	local okCount, seen = pcall(chat.GetNumMessages, chat)
+	if not okCount or type(seen) ~= "number" or ns.ValueIsSecret(seen) then
+		return
+	end
+	local printed, elapsed = 0, 0
+	local function poll()
+		elapsed = elapsed + 1
+		local ok, count = pcall(chat.GetNumMessages, chat)
+		if ok and type(count) == "number" and not ns.ValueIsSecret(count) and count > seen then
+			Say(string.format("backfill +%ds: %d new line(s), tabVisible=%s", elapsed, count - seen, Show(chat:IsVisible())))
+			for index = seen + 1, count do
+				if printed < 8 then
+					printed = printed + 1
+					local okInfo, text = pcall(chat.GetMessageInfo, chat, index)
+					Say(string.format("  new [%d] %s", index, okInfo and DescribeText(text) or "error"))
+				end
+			end
+			seen = count
+		end
+		if elapsed < 20 and C_Timer and C_Timer.After then
+			C_Timer.After(1, poll)
+		else
+			Say("backfill watch done after " .. elapsed .. " s")
+		end
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(1, poll)
+	end
+end
+
 local function OnCast(unit, castGUID, spellID)
 	if castLines >= MAX_CAST then
 		return
@@ -214,6 +269,9 @@ local function OnUnitCombat(unit, action, flag, amount, school)
 		return
 	end
 	lines = lines + 1
+	if lines == 1 then
+		LogState("in combat:")
+	end
 	Say(string.format("hit on target flag=%s, newest combat log line now:", Show(flag)))
 	ReadRecentLines("  live", 1)
 end
@@ -244,15 +302,10 @@ function ns.Probe.Run()
 				return
 			end
 			if event == "PLAYER_REGEN_ENABLED" then
-				-- The meter fills in a moment after combat. Read it then, once per fight.
-				if C_Timer and C_Timer.After then
-					C_Timer.After(1.5, function()
-						Say("combat ended, last Combat Log lines:")
-						ns.Guard("Probe", function()
-							ReadRecentLines("  after", 6)
-						end)
-					end)
-				end
+				ns.Guard("Probe", function()
+					LogState("combat ended:")
+					WatchBackfill()
+				end)
 				return
 			end
 			ns.Guard("Probe", function()
