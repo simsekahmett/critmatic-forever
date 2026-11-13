@@ -49,10 +49,11 @@ function ns.TableIsSecret(value)
 end
 
 function ns.PlainString(value)
-	if type(value) ~= "string" or value == "" then
+	if type(value) ~= "string" then
 		return nil
 	end
-	if ns.ValueIsSecret(value) then
+	-- Check secrecy before any comparison: comparing a secret string raises an error.
+	if ns.ValueIsSecret(value) or value == "" then
 		return nil
 	end
 	return value

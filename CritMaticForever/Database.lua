@@ -94,13 +94,14 @@ end
 local function CharacterKey()
 	local name = type(UnitName) == "function" and UnitName("player") or nil
 	local realm = type(GetRealmName) == "function" and GetRealmName() or nil
-	if type(name) ~= "string" or name == "" or (UNKNOWNOBJECT and name == UNKNOWNOBJECT) then
+	-- Secrecy first: comparing a secret string raises an error.
+	if type(name) ~= "string" or type(realm) ~= "string" then
 		return nil
 	end
-	if type(realm) ~= "string" or realm == "" then
+	if ns.ValueIsSecret(name) or ns.ValueIsSecret(realm) then
 		return nil
 	end
-	if ns.ValueIsSecret and (ns.ValueIsSecret(name) or ns.ValueIsSecret(realm)) then
+	if name == "" or realm == "" or (UNKNOWNOBJECT and name == UNKNOWNOBJECT) then
 		return nil
 	end
 	return name .. "-" .. realm, name, realm
