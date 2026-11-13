@@ -128,6 +128,8 @@ function ns.Commands.Handle(message)
 		ns.Commands.Demo()
 	elseif command == "status" then
 		ns.Commands.Status()
+	elseif command == "probe" then
+		ns.Probe.Run()
 	else
 		ns.Print(ns.L.UNKNOWN)
 	end

@@ -22,5 +22,6 @@ CritLog.lua
 Tooltips.lua
 Options.lua
 Minimap.lua
+Probe.lua
 Commands.lua
 Init.lua
