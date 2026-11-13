@@ -4,15 +4,6 @@ ns.Recorder = {
 	hidden = 0,
 	pending = {},
 	fightFeed = {},
-	session = {
-		damage = {},
-		healing = {},
-		petDamage = {},
-		petHealing = {},
-		secret = false,
-		updated = nil,
-		available = false,
-	},
 }
 
 local function BucketFor(record, kind)
@@ -20,6 +11,28 @@ local function BucketFor(record, kind)
 		return record.heal
 	end
 	return record.damage
+end
+
+local function AnnounceKey(spellID, isPet, kind, field)
+	return ns.Logic.RecordKey(spellID, isPet) .. ":" .. (kind or "damage") .. ":" .. (field or "hit")
+end
+
+local function NoteAnnounced(spellID, isPet, kind, field, amount)
+	if type(spellID) ~= "number" or type(amount) ~= "number" then
+		return
+	end
+	if not ns.Recorder.announced then
+		ns.Recorder.announced = {}
+	end
+	ns.Recorder.announced[AnnounceKey(spellID, isPet, kind, field)] = amount
+end
+
+local function ReadAnnounced(spellID, isPet, kind, field)
+	local saved = ns.Recorder.announced and ns.Recorder.announced[AnnounceKey(spellID, isPet, kind, field)]
+	if ns.ValueIsSecret(saved) or (type(saved) == "number" and saved > 0) then
+		return saved
+	end
+	return nil
 end
 
 function ns.Recorder.BuildPayload(record, outcome)
@@ -30,11 +43,7 @@ function ns.Recorder.BuildPayload(record, outcome)
 	end
 
 	local label, colorKey, soundKey
-	if outcome.field == "fight" and outcome.kind == "heal" then
-		label, colorKey, soundKey = L.NEW_FIGHT_HEAL, "heal", "soundHeal"
-	elseif outcome.field == "fight" then
-		label, colorKey, soundKey = L.NEW_FIGHT, "hit", "soundHit"
-	elseif outcome.kind == "heal" and outcome.field == "crit" then
+	if outcome.kind == "heal" and outcome.field == "crit" then
 		label, colorKey, soundKey = L.NEW_HEAL_CRIT, record.isPet and "petCrit" or "critHeal", "soundHealCrit"
 	elseif outcome.kind == "heal" then
 		label, colorKey, soundKey = L.NEW_HEAL, "heal", "soundHeal"
@@ -46,12 +55,16 @@ function ns.Recorder.BuildPayload(record, outcome)
 
 	local amount = ns.FormatNumber(outcome.amount)
 	local previous
-	local chat
-	if outcome.previous and outcome.previous > 0 then
+	local secretPrevious
+	local chat = ns.FormatLine(L.CHAT_RECORD, label, name, amount)
+	if ns.ValueIsSecret(outcome.previous) then
+		secretPrevious = outcome.previous
+		local suffix = ns.FormatLine(L.CHAT_PREVIOUS, outcome.previous)
+		chat = ns.JoinText(chat, suffix)
+	elseif type(outcome.previous) == "number" and outcome.previous > 0 then
 		previous = ns.FormatNumber(outcome.previous)
-		chat = string.format(L.CHAT_RECORD_PREV, label, name, amount, previous)
-	else
-		chat = string.format(L.CHAT_RECORD, label, name, amount)
+		local suffix = ns.FormatLine(L.CHAT_PREVIOUS, previous)
+		chat = ns.JoinText(chat, suffix)
 	end
 
 	return {
@@ -59,6 +72,7 @@ function ns.Recorder.BuildPayload(record, outcome)
 		label = label,
 		amount = amount,
 		previous = previous,
+		secretPrevious = secretPrevious,
 		icon = record.icon,
 		colorKey = colorKey,
 		chat = chat,
@@ -77,9 +91,6 @@ function ns.Recorder.Emit(payload)
 		return
 	end
 	local showAlert = ns.Database.Get("alert")
-	if payload.field == "fight" then
-		showAlert = showAlert and ns.Database.Get("alertFight")
-	end
 	if showAlert then
 		ns.Alerts.Show(payload, false)
 	end
@@ -95,10 +106,6 @@ end
 
 function ns.Recorder.Celebrate(record, outcome)
 	if not outcome or outcome.silent then
-		return
-	end
-	-- Fight totals are kept and shown in the Fight tab; they are announced only on request.
-	if outcome.field == "fight" and not ns.Database.Get("alertFight") then
 		return
 	end
 	local payload = ns.Recorder.BuildPayload(record, outcome)
@@ -153,15 +160,6 @@ function ns.Recorder.FlushPending()
 	for index = 1, #queued do
 		ns.Recorder.Emit(queued[index])
 	end
-end
-
-local fightSerial = 0
-
--- Unique across reloads, because the id is saved on the bucket that holds the best.
-function ns.Recorder.NewFightID(prefix)
-	fightSerial = fightSerial + 1
-	ns.Recorder.fightID = (prefix or "fight") .. ":" .. tostring(ns.Now()) .. ":" .. tostring(fightSerial)
-	return ns.Recorder.fightID
 end
 
 local function ResolveSpell(described)
@@ -257,6 +255,11 @@ function ns.Recorder.RecordHit(hit)
 		target = hit.target,
 		now = ns.Now(),
 	}, ns.Database.Settings())
+	if outcome and not ns.ValueIsSecret(outcome.previous) and (type(outcome.previous) ~= "number" or outcome.previous <= 0) then
+		if ns.ValueIsSecret(hit.previous) or (type(hit.previous) == "number" and hit.previous > 0) then
+			outcome.previous = hit.previous
+		end
+	end
 	if not existing and not outcome then
 		return
 	end
@@ -267,6 +270,9 @@ function ns.Recorder.RecordHit(hit)
 		record.damage = scratch
 	end
 	ns.Recorder.Celebrate(record, outcome)
+	if outcome then
+		NoteAnnounced(hit.spellID, hit.isPet, hit.kind, hit.isCrit and "crit" or "hit", hit.amount)
+	end
 end
 
 -- Combat Log tab --------------------------------------------------------------
@@ -463,14 +469,615 @@ function ns.Recorder.RequestLiveRead()
 	end)
 end
 
-local function OnUnitCombat(unit, action)
-	if ns.ValueIsSecret(unit) or ns.ValueIsSecret(action) then
+-- UNIT_COMBAT reports the hit as it lands. The amount is secret, so it is shown
+-- directly and compared with a curve. The spell name is the cast that just finished.
+local function IncomingUnit(unit)
+	if type(unit) ~= "string" or ns.ValueIsSecret(unit) then
+		return false
+	end
+	if unit == "player" or unit == "pet" then
+		return true
+	end
+	return unit:find("^party") ~= nil or unit:find("^raid") ~= nil
+end
+
+local function EventSchool(school)
+	if type(school) == "number" and not ns.ValueIsSecret(school) then
+		return school
+	end
+	return nil
+end
+
+local function SameSchool(left, right)
+	if type(left) ~= "number" or type(right) ~= "number" then
+		return false
+	end
+	if bit and bit.band then
+		return bit.band(left, right) ~= 0
+	end
+	return left == right
+end
+
+local function PlayerHasAura(spellID)
+	if type(spellID) ~= "number" then
+		return nil
+	end
+	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+		local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+		if ok then
+			if aura == nil then
+				if ns.Recorder.inCombat then
+					return nil
+				end
+				return false
+			end
+			if ns.ValueIsSecret(aura) or ns.TableIsSecret(aura) then
+				return nil
+			end
+			return true
+		end
+	end
+	return nil
+end
+
+local function AuraLive(cast, now)
+	local up = PlayerHasAura(cast.spellID)
+	if up == true then
+		return true
+	end
+	if up == false then
+		return false
+	end
+	return (now - (cast.time or 0)) <= 600
+end
+
+local MELEE_WINDOW = 0.4
+local MATCH_WINDOW = 5
+local REACTIVE_WINDOW = 0.2
+
+local function LearnedSchool(spellID)
+	local book = ns.char and ns.char.castLearn
+	local stats = type(book) == "table" and book[spellID] or nil
+	local votes = stats and stats.dmg
+	if type(votes) ~= "table" then
+		return nil
+	end
+	local best, bestCount
+	for mask, count in pairs(votes) do
+		if type(mask) == "number" and type(count) == "number" and (not bestCount or count > bestCount) then
+			best, bestCount = mask, count
+		end
+	end
+	return best
+end
+
+local function VoteSchool(spellID, schoolMask)
+	if type(spellID) ~= "number" or type(schoolMask) ~= "number" or type(ns.char) ~= "table" then
 		return
 	end
-	-- Your hits land on the target; your heals usually land on you.
-	if (unit == "target" and action == "WOUND") or (unit == "player" and action == "HEAL") then
-		ns.Recorder.RequestLiveRead()
+	local book = ns.char.castLearn
+	if type(book) ~= "table" then
+		book = {}
+		ns.char.castLearn = book
 	end
+	local stats = book[spellID]
+	if type(stats) ~= "table" then
+		stats = {}
+		book[spellID] = stats
+	end
+	local votes = stats.dmg
+	if type(votes) ~= "table" then
+		votes = {}
+		stats.dmg = votes
+	end
+	votes[schoolMask] = (votes[schoolMask] or 0) + 1
+end
+
+local function PruneDamageCasts(now)
+	local queue = ns.Recorder.damageCasts
+	if type(queue) ~= "table" then
+		return
+	end
+	while queue[1] and (queue[1].used or now - (queue[1].time or 0) > MATCH_WINDOW) do
+		table.remove(queue, 1)
+	end
+end
+
+-- Oldest unused cast whose learned school matches. A physical swing while you
+-- are attacking only belongs to a spell cast in the last 0.4s; anything later is an auto attack.
+local function MatchDamage(eventSchool)
+	local now = GetTime and GetTime() or 0
+	PruneDamageCasts(now)
+	local melee = ns.Recorder.meleeActive or ns.Recorder.autoRepeat
+	local maxAge = MATCH_WINDOW
+	if melee and (eventSchool == nil or eventSchool == 1) then
+		maxAge = MELEE_WINDOW
+	end
+	local queue = ns.Recorder.damageCasts
+	local exact, unknown
+	if type(queue) == "table" then
+		for index = 1, #queue do
+			local cast = queue[index]
+			local age = now - (cast.time or 0)
+			if not cast.used and age >= 0 and age <= maxAge then
+				local school = LearnedSchool(cast.spellID) or cast.school
+				if eventSchool ~= nil and school ~= nil and school ~= eventSchool then
+					-- a physical cast cannot take a nature hit
+				elseif eventSchool ~= nil and school == eventSchool then
+					exact = cast
+					break
+				elseif not unknown then
+					unknown = cast
+				end
+			end
+		end
+	end
+	local cast = exact or unknown
+	if not cast then
+		local channel = ns.Recorder.channelCast
+		if channel then
+			local school = LearnedSchool(channel.spellID)
+			if eventSchool == nil or school == nil or school == eventSchool then
+				cast = channel
+			end
+		end
+	end
+	if cast then
+		cast.used = true
+		if eventSchool ~= nil then
+			VoteSchool(cast.spellID, eventSchool)
+		end
+		PruneDamageCasts(now)
+		return cast.spellID, cast.pet and true or false
+	end
+	local hurtAge = now - (ns.Recorder.lastHurt or -100)
+	local justHurt = hurtAge >= 0 and hurtAge <= REACTIVE_WINDOW
+	local reactive = ns.Recorder.reactiveSpell
+	if reactive and eventSchool ~= 1 and (justHurt or eventSchool == 8 or (eventSchool ~= nil and SameSchool(reactive.school, eventSchool))) then
+		if AuraLive(reactive, now) then
+			return reactive.spellID, false
+		end
+	end
+	if eventSchool == nil or eventSchool == 1 then
+		return ns.Logic.AutoAttackID(), false
+	end
+	return nil, false
+end
+
+local function RecentSpell(kind, eventSchool)
+	local history = ns.Recorder.castHistory
+	if kind == "heal" then
+		local now = GetTime and GetTime() or 0
+		if type(history) == "table" then
+			for index = #history, 1, -1 do
+				local cast = history[index]
+				local age = now - (cast.time or 0)
+				if age > 21 then
+					break
+				end
+				if age >= 0 and cast.role == "heal" then
+					return cast.spellID, cast.pet
+				end
+			end
+		end
+		return nil, false
+	end
+	return MatchDamage(eventSchool)
+end
+
+local function MemoryKey(spellID, isPet, kind, field)
+	local suffix = (kind or "damage") .. ":" .. (field or "crit")
+	if type(spellID) ~= "number" then
+		return suffix
+	end
+	return ns.Logic.RecordKey(spellID, isPet) .. ":" .. suffix
+end
+
+local function SavedCrit(spellID, isPet, kind, field)
+	if type(spellID) ~= "number" or type(ns.char) ~= "table" or type(ns.char.records) ~= "table" then
+		return 0
+	end
+	local record = ns.char.records[ns.Logic.RecordKey(spellID, isPet)]
+	if type(record) ~= "table" then
+		return 0
+	end
+	local bucket = kind == "heal" and record.heal or record.damage
+	local value = type(bucket) == "table" and bucket[field or "crit"] or nil
+	if type(value) == "number" and not ns.ValueIsSecret(value) and value > 0 then
+		return value
+	end
+	return 0
+end
+
+-- Writes one plain record into the character saved vars. A secret must never land
+-- in that table: the client drops it on logout and the log looks session-only.
+function ns.Recorder.StorePlain(spellID, isPet, kind, field, number)
+	if type(spellID) ~= "number" or type(number) ~= "number" or ns.ValueIsSecret(number) or number <= 0 then
+		return false
+	end
+	number = math.floor(number + 0.5)
+	local name, icon = ns.SpellInfo(spellID)
+	if ns.ValueIsSecret(name) then
+		name = nil
+	end
+	if ns.ValueIsSecret(icon) then
+		icon = nil
+	end
+	local record = ns.Database.EnsureRecord(spellID, isPet, name, icon)
+	local bucket = kind == "heal" and record.heal or record.damage
+	local slot = field == "crit" and "crit" or "hit"
+	local previous = bucket[slot]
+	if type(previous) ~= "number" or ns.ValueIsSecret(previous) then
+		previous = 0
+	end
+	if number <= previous then
+		return true
+	end
+	bucket[slot] = number
+	if slot == "crit" then
+		bucket.critTime = ns.Now()
+	else
+		bucket.hitTime = ns.Now()
+	end
+	local key = MemoryKey(spellID, isPet, kind, slot)
+	if ns.Recorder.combatBest then
+		ns.Recorder.combatBest[key] = nil
+	end
+	if ns.Recorder.secretBest then
+		ns.Recorder.secretBest[key] = nil
+	end
+	if ns.CritLog and ns.CritLog.IsShown and ns.CritLog.IsShown() then
+		ns.CritLog.Refresh()
+	end
+	return true
+end
+
+local function QueueSave(spellID, isPet, kind, field, amount)
+	if type(spellID) ~= "number" or type(amount) ~= "number" then
+		return
+	end
+	local number = ns.PlainAmount(amount)
+	if number and ns.Recorder.StorePlain(spellID, isPet, kind, field, number) then
+		return
+	end
+	if not ns.ValueIsSecret(amount) then
+		return
+	end
+	if not ns.Recorder.toSave then
+		ns.Recorder.toSave = {}
+	end
+	local key = MemoryKey(spellID, isPet, kind, field)
+	local row = ns.Recorder.toSave[key]
+	if type(row) ~= "table" then
+		row = {
+			spellID = spellID,
+			isPet = isPet and true or false,
+			kind = kind,
+			field = field,
+			amounts = {},
+		}
+		ns.Recorder.toSave[key] = row
+	end
+	local amounts = row.amounts
+	amounts[#amounts + 1] = amount
+	if #amounts > 40 then
+		table.remove(amounts, 1)
+	end
+	ns.Recorder.ScheduleSave()
+end
+
+local saveSerial = 0
+
+function ns.Recorder.FlushSavedRecords()
+	local pending = ns.Recorder.toSave
+	if type(pending) ~= "table" then
+		return
+	end
+	local left = {}
+	for key, row in pairs(pending) do
+		local best
+		local waiting = {}
+		local amounts = row.amounts or { row.amount }
+		for index = 1, #amounts do
+			local number = ns.PlainAmount(amounts[index])
+			if number and (not best or number > best) then
+				best = number
+			elseif not number then
+				waiting[#waiting + 1] = amounts[index]
+			end
+		end
+		if best then
+			ns.Recorder.StorePlain(row.spellID, row.isPet, row.kind, row.field, best)
+		end
+		if #waiting > 0 then
+			row.amounts = waiting
+			left[key] = row
+		end
+	end
+	ns.Recorder.toSave = left
+end
+
+function ns.Recorder.ScheduleSave()
+	saveSerial = saveSerial + 1
+	local serial = saveSerial
+	local delays = { 0.4, 1.5, 4 }
+	local function step(index)
+		if not C_Timer or not C_Timer.After then
+			return
+		end
+		local delay = delays[index]
+		if not delay then
+			return
+		end
+		C_Timer.After(delay, function()
+			if serial ~= saveSerial then
+				return
+			end
+			ns.Recorder.FlushSavedRecords()
+			if ns.Recorder.toSave and next(ns.Recorder.toSave) then
+				step(index + 1)
+			end
+		end)
+	end
+	step(1)
+end
+
+function ns.Recorder.NoteCast(unit, _, spellID)
+	if unit ~= "player" and unit ~= "pet" then
+		return
+	end
+	if ns.ValueIsSecret(spellID) or type(spellID) ~= "number" then
+		return
+	end
+	local now = GetTime and GetTime() or 0
+	local role = ns.SpellRole(spellID)
+	local entry = {
+		spellID = spellID,
+		pet = unit == "pet",
+		time = now,
+		role = role,
+		school = ns.SpellSchool(spellID),
+	}
+	ns.Recorder.lastCast = entry
+	if spellID ~= ns.Logic.AutoAttackID() and unit == "player" then
+		if role == "aura" then
+			ns.Recorder.reactiveSpell = entry
+		elseif role == "damage" then
+			PruneDamageCasts(now)
+			local queue = ns.Recorder.damageCasts
+			if type(queue) ~= "table" then
+				queue = {}
+				ns.Recorder.damageCasts = queue
+			end
+			queue[#queue + 1] = {
+				spellID = spellID,
+				pet = false,
+				time = now,
+				school = entry.school,
+				used = false,
+			}
+		end
+	end
+	local history = ns.Recorder.castHistory
+	if type(history) ~= "table" then
+		history = {}
+		ns.Recorder.castHistory = history
+	end
+	history[#history + 1] = entry
+	if #history > 20 then
+		table.remove(history, 1)
+	end
+end
+
+local function ShareCrit(name, amount)
+	local party = ns.Database.Get("shareParty")
+	local guild = ns.Database.Get("shareGuild")
+	local raid = ns.Database.Get("shareRaid")
+	if not party and not guild and not raid then
+		return
+	end
+	local line = ns.FormatLine(ns.L.CRIT_SHARE, name, amount)
+	if line == nil then
+		return
+	end
+	local function send(channel, enabled, present)
+		if not enabled or not present then
+			return
+		end
+		if type(SendChatMessage) == "function" then
+			pcall(SendChatMessage, line, channel)
+		elseif C_ChatInfo and C_ChatInfo.SendChatMessage then
+			pcall(C_ChatInfo.SendChatMessage, line, channel)
+		end
+	end
+	send("PARTY", party, IsInGroup and IsInGroup())
+	send("RAID", raid, IsInRaid and IsInRaid())
+	send("GUILD", guild, IsInGuild and IsInGuild())
+end
+
+function ns.Recorder.ShowCrit(kind, amount, spellID, isPet)
+	local name, icon
+	if type(spellID) == "number" then
+		name, icon = ns.SpellInfo(spellID)
+	end
+	if isPet and name then
+		name = ns.L.PET .. ": " .. name
+	end
+	if not name then
+		name = kind == "heal" and ns.L.HEAL or ns.L.AUTO_ATTACK
+	end
+	if ns.Database.IsIgnoredSpell(spellID, name) then
+		return
+	end
+	local colorKey = kind == "heal" and "critHeal" or "crit"
+	local soundKey = kind == "heal" and "soundHealCrit" or "soundCrit"
+	if ns.Database.Get("alert") then
+		ns.Alerts.Show({
+			name = name,
+			critFeed = true,
+			secretAmount = amount,
+			icon = icon,
+			colorKey = colorKey,
+			sound = ns.Database.Get(soundKey),
+		}, false)
+	end
+	if ns.Database.Get("chat") then
+		local line = ns.FormatLine(ns.L.CRIT_LINE, name, amount)
+		if line ~= nil then
+			ns.Print(line)
+		end
+	end
+	ShareCrit(name, amount)
+end
+
+function ns.Recorder.ShowSecretHit(kind, isCrit, amount, spellID, isPet, previous)
+	local now = GetTime and GetTime() or 0
+	if not isCrit and (now - (ns.Recorder.lastSecretAt or 0)) < 0.05 then
+		return
+	end
+	ns.Recorder.lastSecretAt = now
+	if type(spellID) ~= "number" then
+		spellID, isPet = RecentSpell(kind)
+	end
+	local name, icon
+	if type(spellID) == "number" then
+		name, icon = ns.SpellInfo(spellID)
+	end
+	if isPet and name then
+		name = ns.L.PET .. ": " .. name
+	end
+	if not name then
+		name = kind == "heal" and ns.L.NEW_HEAL or ns.L.AUTO_ATTACK
+	end
+	if ns.Database.IsIgnoredSpell(spellID, name) then
+		return
+	end
+	local label, colorKey, soundKey
+	if kind == "heal" and isCrit then
+		label, colorKey, soundKey = ns.L.NEW_HEAL_CRIT, "critHeal", "soundHealCrit"
+	elseif kind == "heal" then
+		label, colorKey, soundKey = ns.L.NEW_HEAL, "heal", "soundHeal"
+	elseif isCrit then
+		label, colorKey, soundKey = ns.L.NEW_CRIT, "crit", "soundCrit"
+	else
+		label, colorKey, soundKey = ns.L.NEW_HIT, "hit", "soundHit"
+	end
+	local previousSecret
+	local previousPlain
+	if ns.ValueIsSecret(previous) then
+		local recovered = ns.PlainAmount(previous)
+		if type(recovered) == "number" and not ns.ValueIsSecret(recovered) and recovered > 0 then
+			previousPlain = ns.FormatNumber(recovered)
+		else
+			previousSecret = previous
+		end
+	elseif type(previous) == "number" and previous > 0 then
+		previousPlain = ns.FormatNumber(previous)
+	end
+	local hasPrevious = previousPlain ~= nil or ns.ValueIsSecret(previousSecret)
+	if ns.Database.Get("alert") then
+		ns.Alerts.Show({
+			name = name,
+			label = label,
+			secretAmount = amount,
+			previous = previousPlain,
+			secretPrevious = previousSecret,
+			icon = icon,
+			colorKey = colorKey,
+			sound = ns.Database.Get(soundKey),
+		}, false)
+	end
+	if ns.Database.Get("chat") then
+		local line = ns.FormatLine(ns.L.CHAT_RECORD, label, name, amount)
+		if hasPrevious then
+			local shownPrevious = previousPlain
+			if shownPrevious == nil then
+				shownPrevious = previousSecret
+			end
+			local suffix = ns.FormatLine(ns.L.CHAT_PREVIOUS, shownPrevious)
+			line = ns.JoinText(line, suffix)
+		end
+		if line ~= nil then
+			ns.Print(line)
+		end
+	end
+	NoteAnnounced(spellID, isPet, kind, isCrit and "crit" or "hit", amount)
+	ns.Recorder.shownSecret = (ns.Recorder.shownSecret or 0) + 1
+end
+
+local IGNORE_ACTION = {
+	MISS = true,
+	DODGE = true,
+	PARRY = true,
+	RESIST = true,
+	ABSORB = true,
+	DEFLECT = true,
+	IMMUNE = true,
+	EVADE = true,
+	REFLECT = true,
+	ENERGIZE = true,
+}
+
+function ns.Recorder.OnUnitCombat(unit, action, flagText, amount, school)
+	local actionText
+	if type(action) == "string" and not ns.ValueIsSecret(action) then
+		actionText = action
+	end
+	if actionText and IGNORE_ACTION[actionText] then
+		return
+	end
+	if type(amount) ~= "number" then
+		return
+	end
+	local crit = false
+	local flagSecret = flagText ~= nil and ns.ValueIsSecret(flagText)
+	if not flagSecret then
+		if type(flagText) == "boolean" then
+			crit = flagText == true
+		elseif type(flagText) == "string" then
+			crit = flagText:find("CRIT") ~= nil
+		end
+	end
+	local incoming = IncomingUnit(unit)
+	local kind
+	if actionText == "HEAL" then
+		if not incoming then
+			return
+		end
+		kind = "heal"
+	elseif incoming then
+		if actionText ~= "HEAL" then
+			ns.Recorder.lastHurt = GetTime and GetTime() or 0
+		end
+		return
+	else
+		if unit ~= "target" then
+			return
+		end
+		kind = "damage"
+	end
+	if kind == "damage" and ns.Database.Get("trackDamage") == false then
+		return
+	end
+	if kind == "heal" and ns.Database.Get("trackHealing") == false then
+		return
+	end
+	-- The crit flag is a plain string on this client. A hidden flag is not treated as a crit.
+	if flagSecret or not crit then
+		return
+	end
+	if ns.Database.Get("trackCrit") == false then
+		return
+	end
+	local spellID, isPet = RecentSpell(kind, EventSchool(school))
+	if type(spellID) ~= "number" then
+		return
+	end
+	-- Ticks and heal over time show only when they crit. Direct hits use that same rule.
+	if ns.SpellPeriodic(spellID) and not crit then
+		return
+	end
+	pcall(ns.Recorder.ShowCrit, kind, amount, spellID, isPet)
 end
 
 function ns.Recorder.OnCombatLog()
@@ -482,180 +1089,6 @@ function ns.Recorder.OnCombatLog()
 			CombatLogGetCurrentEventInfo()
 		ns.Recorder.HandleEvent(subevent, sourceGUID, sourceFlags, destName, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12)
 	end)
-end
-
-local function MeterType(kind)
-	local enum = Enum and Enum.DamageMeterType
-	if kind == "heal" then
-		return enum and enum.HealingDone or 2
-	end
-	return enum and enum.DamageDone or 0
-end
-
-local function SessionCandidates()
-	local enum = Enum and Enum.DamageMeterSessionType
-	return {
-		enum and enum.Current or 1,
-		enum and enum.Expired or 2,
-	}
-end
-
-local function ConsumeSource(into, source, isPet, kind)
-	if source == nil then
-		return true, 0
-	end
-	if ns.TableIsSecret(source) then
-		return false, 0
-	end
-	local spells = source.combatSpells
-	if spells == nil then
-		return true, 0
-	end
-	if ns.TableIsSecret(spells) then
-		return false, 0
-	end
-	local hidden = 0
-	local readable = 0
-	for index = 1, #spells do
-		local spell = spells[index]
-		if type(spell) == "table" and not ns.TableIsSecret(spell) then
-			local spellID = spell.spellID
-			local total = spell.totalAmount
-			if ns.ValueIsSecret(spellID) or ns.ValueIsSecret(total) then
-				hidden = hidden + 1
-			elseif type(spellID) == "number" and type(total) == "number" and total > 0 then
-				readable = readable + 1
-				local name, icon = ns.SpellInfo(spellID)
-				into[spellID] = {
-					total = total,
-					name = name,
-					icon = icon,
-					isPet = isPet and true or false,
-				}
-				if not ns.Database.IsIgnoredSpell(spellID, name) and ns.Database.Get("trackFight") then
-					local record = ns.Database.EnsureRecord(spellID, isPet, name, icon)
-					local _, outcome = ns.Logic.ApplyFightTotal(BucketFor(record, kind), total, ns.Now(), kind, ns.Recorder.fightID)
-					ns.Recorder.Celebrate(record, outcome)
-				end
-			end
-		end
-	end
-	if readable == 0 and hidden > 0 then
-		return false, 0
-	end
-	return true, readable
-end
-
--- Current is the live pull. Expired is the fight that just ended. Expired is only a
--- fallback for an empty Current. When Current is still hidden, stop and let the caller
--- retry: falling through would save an older fight's totals as this fight and end
--- the retries before the real numbers unlock.
-local function ReadSource(into, kind, isPet, guid)
-	if type(guid) ~= "string" or ns.ValueIsSecret(guid) then
-		return false
-	end
-	local meterType = MeterType(kind)
-	for _, sessionType in ipairs(SessionCandidates()) do
-		local ok, source = pcall(C_DamageMeter.GetCombatSessionSourceFromType, sessionType, meterType, guid)
-		if ok then
-			local allowed, added = ConsumeSource(into, source, isPet, kind)
-			if not allowed then
-				return false
-			end
-			if added > 0 then
-				return true
-			end
-		end
-	end
-	return true
-end
-
-function ns.Recorder.ReadMeter()
-	local session = ns.Recorder.session
-	if not C_DamageMeter or type(C_DamageMeter.GetCombatSessionSourceFromType) ~= "function" then
-		session.available = false
-		return
-	end
-	session.available = true
-	local playerGUID = UnitGUID("player")
-	local damage = {}
-	local healing = {}
-	local damageOk = ReadSource(damage, "damage", false, playerGUID)
-	local healOk = ReadSource(healing, "heal", false, playerGUID)
-	if damageOk then
-		session.damage = damage
-	end
-	if healOk then
-		session.healing = healing
-	end
-
-	session.petDamage = {}
-	session.petHealing = {}
-	if ns.Database.Get("trackPet") and UnitExists("pet") then
-		local possessed = type(UnitIsPossessed) == "function" and UnitIsPossessed("pet")
-		local petGUID = UnitGUID("pet")
-		if not possessed and petGUID and not ns.ValueIsSecret(petGUID) then
-			local petDamage, petHealing = {}, {}
-			if ReadSource(petDamage, "damage", true, petGUID) then
-				session.petDamage = petDamage
-			end
-			if ReadSource(petHealing, "heal", true, petGUID) then
-				session.petHealing = petHealing
-			end
-		end
-	end
-
-	session.secret = not damageOk or not healOk
-	session.updated = ns.Now()
-	if ns.CritLog and ns.CritLog.IsShown and ns.CritLog.IsShown() then
-		ns.CritLog.Refresh()
-	end
-end
-
--- Every meter event used to start its own retry chain. Only the newest chain runs now.
--- withSummary prints the end-of-fight summary after the fight totals are read, so the
--- fight bests found by that read are part of it.
-local readSerial = 0
-
-function ns.Recorder.ScheduleMeterRead(withSummary)
-	readSerial = readSerial + 1
-	local serial = readSerial
-	if withSummary then
-		ns.Recorder.summaryPending = true
-	end
-	local tries = 0
-	local function finish()
-		-- Single hits from the Combat Log tab, then the summary that covers both.
-		ns.Recorder.ReadCombatLogTab(function()
-			if ns.Recorder.summaryPending then
-				ns.Recorder.summaryPending = false
-				ns.Recorder.PrintSummary()
-			end
-		end)
-	end
-	local function tick()
-		if serial ~= readSerial then
-			return
-		end
-		if ns.Recorder.inCombat then
-			-- A new pull started. That fight schedules its own read when it ends.
-			ns.Recorder.summaryPending = false
-			return
-		end
-		tries = tries + 1
-		local ok = ns.Guard("DamageMeter", ns.Recorder.ReadMeter)
-		if (not ok or ns.Recorder.session.secret) and tries < 8 and C_Timer and C_Timer.After then
-			C_Timer.After(0.4, tick)
-			return
-		end
-		finish()
-	end
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.3, tick)
-	else
-		ns.Guard("DamageMeter", ns.Recorder.ReadMeter)
-		finish()
-	end
 end
 
 -- Registering COMBAT_LOG_EVENT_UNFILTERED is itself a protected action on Forever.
@@ -682,33 +1115,75 @@ function ns.Recorder.Init()
 	ns.Recorder.combatLogEnabled = false
 	ns.Recorder.combatLogError = nil
 
-	local meter = CreateFrame("Frame")
-	ns.Recorder.meterFrame = meter
-	meter:SetScript("OnEvent", function(_, event)
+	local combat = CreateFrame("Frame")
+	ns.Recorder.combatState = combat
+	combat:SetScript("OnEvent", function(_, event)
 		if event == "PLAYER_REGEN_DISABLED" then
 			ns.Recorder.inCombat = true
 			ns.Recorder.pending = {}
 			ns.Recorder.fightFeed = {}
-			ns.Recorder.NewFightID("fight")
 		elseif event == "PLAYER_REGEN_ENABLED" then
 			ns.Recorder.inCombat = false
 			ns.Recorder.FlushPending()
-			ns.Recorder.ScheduleMeterRead(true)
-		elseif not ns.Recorder.inCombat then
-			ns.Recorder.ScheduleMeterRead()
+			ns.Recorder.FlushSavedRecords()
+			ns.Recorder.ScheduleSave()
+			ns.Recorder.PrintSummary()
+		elseif event == "PLAYER_LOGOUT" then
+			ns.Recorder.FlushSavedRecords()
 		end
 	end)
+	combat:RegisterEvent("PLAYER_REGEN_DISABLED")
+	combat:RegisterEvent("PLAYER_REGEN_ENABLED")
+	combat:RegisterEvent("PLAYER_LOGOUT")
 	local live = CreateFrame("Frame")
 	ns.Recorder.liveFrame = live
-	live:SetScript("OnEvent", function(_, _, unit, action)
-		OnUnitCombat(unit, action)
+	live:SetScript("OnEvent", function(_, event, ...)
+		if event == "UNIT_SPELLCAST_SUCCEEDED" then
+			ns.Recorder.NoteCast(...)
+		elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+			local unit, _, channelID = ...
+			if unit == "player" and type(channelID) == "number" then
+				ns.Recorder.channelCast = {
+					spellID = channelID,
+					time = GetTime and GetTime() or 0,
+					used = false,
+				}
+			end
+		elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+			local cast = ns.Recorder.channelCast
+			if cast and C_Timer and C_Timer.After then
+				C_Timer.After(0.5, function()
+					if ns.Recorder.channelCast == cast then
+						ns.Recorder.channelCast = nil
+					end
+				end)
+			else
+				ns.Recorder.channelCast = nil
+			end
+		elseif event == "PLAYER_ENTER_COMBAT" then
+			ns.Recorder.meleeActive = true
+		elseif event == "PLAYER_LEAVE_COMBAT" then
+			ns.Recorder.meleeActive = false
+		elseif event == "START_AUTOREPEAT_SPELL" then
+			ns.Recorder.autoRepeat = true
+		elseif event == "STOP_AUTOREPEAT_SPELL" then
+			ns.Recorder.autoRepeat = false
+		elseif event == "UNIT_COMBAT" then
+			ns.Recorder.OnUnitCombat(...)
+		end
 	end)
-	pcall(live.RegisterEvent, live, "UNIT_COMBAT")
+	local function listen(event)
+		pcall(live.RegisterEvent, live, event)
+	end
+	listen("UNIT_COMBAT")
+	listen("UNIT_SPELLCAST_SUCCEEDED")
+	listen("UNIT_SPELLCAST_CHANNEL_START")
+	listen("UNIT_SPELLCAST_CHANNEL_STOP")
+	listen("PLAYER_ENTER_COMBAT")
+	listen("PLAYER_LEAVE_COMBAT")
+	listen("START_AUTOREPEAT_SPELL")
+	listen("STOP_AUTOREPEAT_SPELL")
 
-	meter:RegisterEvent("PLAYER_REGEN_DISABLED")
-	meter:RegisterEvent("PLAYER_REGEN_ENABLED")
-	pcall(meter.RegisterEvent, meter, "DAMAGE_METER_COMBAT_SESSION_UPDATED")
-	pcall(meter.RegisterEvent, meter, "DAMAGE_METER_CURRENT_SESSION_UPDATED")
 end
 
 function ns.Recorder.OnLogin()
@@ -718,9 +1193,4 @@ function ns.Recorder.OnLogin()
 	end
 	-- A /reload inside combat skips PLAYER_REGEN_DISABLED, so take the state from the client.
 	ns.Recorder.inCombat = (InCombatLockdown and InCombatLockdown()) and true or false
-	-- Whatever the meter holds at login belongs to one earlier fight.
-	ns.Recorder.NewFightID("login")
-	if not ns.Recorder.inCombat then
-		ns.Recorder.ScheduleMeterRead()
-	end
 end

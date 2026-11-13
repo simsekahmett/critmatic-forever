@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- Single-hit and crit records per spell are back. The addon refills the Combat Log chat tab after your hits (at most once a second) and reads them from it, so a record is announced about a second after the hit. Needs a Combat Log tab and the English client.
-- Fight totals are no longer announced as a "new best" by default; they stay in the Fight tab.
+- Personal best records are off. The client never gives the hit number as a plain integer, so nothing is saved.
+- Every crit is shown as it lands, from UNIT_COMBAT. Ticks and heal over time are shown only when they crit.
+- Chat can share a crit to party, guild, or raid: `CritMatic Forever ★ Claw crit 224`.
+- The on-screen alert is plain text, with no box.
+- Fight totals from the damage meter are no longer recorded or shown.
+- Settings pages are drawn in the window itself. A hidden scroll box left the tabs up and the page blank.
 - `/cmf probe` shows what the client exposes, for troubleshooting.
-- Fight bests: when the current meter session was still hidden, the addon fell back to the older Expired session, saved that fight's totals and stopped retrying. It now waits for the real numbers.
-- Fight bests: one fight read several times no longer announces more than once or overwrites the previous best with a partial total of the same fight.
-- The end-of-fight summary now runs after the damage meter read, so it includes the fight bests.
 - Records are stored per "Name-Realm" in the account file. Existing per-character records are imported once. `/cmf status` shows which character the records belong to.
 - Alert bar: width is measured from the full text, so a reused bar can grow again. Height, icon and stacking follow the text size.
 - Record window: the spell name column follows the window width, and rows update while resizing.

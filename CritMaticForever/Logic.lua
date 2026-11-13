@@ -258,42 +258,6 @@ function Logic.ApplyHit(bucket, event, settings)
 	}
 end
 
--- fightID names the fight the total came from. The meter is read several times for
--- one fight (retries, session updates, DoT ticks after combat). A later, larger read
--- of the same fight raises the stored total but keeps the pre-fight best as previous
--- and does not announce again.
-function Logic.ApplyFightTotal(bucket, total, now, kind, fightID)
-	if type(bucket) ~= "table" then
-		bucket = Logic.NewBucket()
-	end
-	if not Logic.IsUsableNumber(total) then
-		return bucket, nil
-	end
-	local previous = bucket.fight or 0
-	if fightID ~= nil and bucket.fightID == fightID then
-		if total > previous then
-			bucket.fight = total
-			bucket.fightTime = now
-		end
-		return bucket, nil
-	end
-	if total <= previous then
-		return bucket, nil
-	end
-	bucket.prevFight = previous
-	bucket.fight = total
-	bucket.fightTime = now
-	bucket.fightID = fightID
-	return bucket, {
-		field = "fight",
-		kind = kind or "damage",
-		amount = total,
-		previous = previous,
-		-- The first seen total is stored quietly. Later fights announce a new best.
-		silent = previous <= 0,
-	}
-end
-
 -- Combat Log chat tab lines. Forever keeps hit numbers secret for addons, but the
 -- client's own Combat Log tab, filled through C_CombatLog.RefilterEntries after combat,
 -- hands its lines over as plain text:
@@ -446,5 +410,8 @@ function Logic.SortEntries(entries, key, descending)
 end
 
 function Logic.AutoAttackID()
-	return AUTO_ATTACK
+	if type(AUTO_ATTACK) == "number" then
+		return AUTO_ATTACK
+	end
+	return 6603
 end

@@ -2,7 +2,6 @@ local _, ns = ...
 
 ns.CritLog = {
 	mode = "damage",
-	fightSide = "damage",
 	sortKey = "left",
 	sortDesc = true,
 	query = "",
@@ -19,26 +18,15 @@ local function DisplayName(record)
 	return name
 end
 
-local function Bucket(record, mode, fightSide)
+local function Bucket(record, mode)
 	if not record then
 		return nil
 	end
-	local heal = mode == "healing" or (mode == "fight" and fightSide == "heal")
-	return heal and record.heal or record.damage
-end
-
-local function SessionMap(isPet, heal)
-	local session = ns.Recorder.session
-	if isPet then
-		return heal and session.petHealing or session.petDamage
-	end
-	return heal and session.healing or session.damage
+	return mode == "healing" and record.heal or record.damage
 end
 
 function ns.CritLog.BuildEntries()
 	local mode = ns.CritLog.mode
-	local fightSide = ns.CritLog.fightSide
-	local heal = mode == "healing" or (mode == "fight" and fightSide == "heal")
 	local query = (ns.CritLog.query or ""):lower()
 	local showPets = ns.Database.Get("showPets")
 	local merged = {}
@@ -66,40 +54,15 @@ function ns.CritLog.BuildEntries()
 			entry.name = DisplayName(record)
 			entry.rawName = record.name
 			entry.icon = record.icon
-			local bucket = Bucket(record, mode, fightSide)
-			if mode == "fight" then
-				entry.right = bucket and bucket.fight or 0
-			else
-				entry.left = bucket and bucket.crit or 0
-				entry.right = bucket and bucket.hit or 0
-			end
+			local bucket = Bucket(record, mode)
+			entry.left = bucket and bucket.crit or 0
+			entry.right = bucket and bucket.hit or 0
 			entry.critTarget = bucket and bucket.critTarget or nil
 			entry.hitTarget = bucket and bucket.hitTarget or nil
 			entry.critTime = bucket and bucket.critTime or nil
 			entry.hitTime = bucket and bucket.hitTime or nil
 			entry.prevCrit = bucket and bucket.prevCrit or 0
 			entry.prevHit = bucket and bucket.prevHit or 0
-		end
-	end
-
-	if mode == "fight" then
-		local map = SessionMap(false, heal)
-		for spellID, info in pairs(map or {}) do
-			local entry = touch(spellID, false)
-			entry.left = info.total or 0
-			entry.rawName = entry.rawName or info.name
-			entry.name = entry.name or info.name or ("#" .. tostring(spellID))
-			entry.icon = entry.icon or info.icon
-		end
-		if showPets then
-			local pets = SessionMap(true, heal)
-			for spellID, info in pairs(pets or {}) do
-				local entry = touch(spellID, true)
-				entry.left = info.total or 0
-				entry.rawName = entry.rawName or info.name
-				entry.name = entry.name or (ns.L.PET .. ": " .. (info.name or ("#" .. tostring(spellID))))
-				entry.icon = entry.icon or info.icon
-			end
 		end
 	end
 
@@ -119,10 +82,6 @@ end
 local function ShareText(entry)
 	local L = ns.L
 	local name = entry.name or "?"
-	if ns.CritLog.mode == "fight" then
-		local amount = (entry.right or 0) > 0 and entry.right or entry.left
-		return string.format(L.SHARE_FIGHT, name, ns.FormatNumber(amount or 0))
-	end
 	local heal = ns.CritLog.mode == "healing"
 	if (entry.left or 0) > 0 then
 		local pattern = heal and L.SHARE_HEAL_CRIT or L.SHARE_CRIT
@@ -333,10 +292,7 @@ function ns.CritLog.ShowRowTooltip(row)
 			GameTooltip:AddDoubleLine(ns.L.WHEN, date("%Y-%m-%d %H:%M", when), 0.7, 0.7, 0.7, 0.85, 0.85, 0.85)
 		end
 	end
-	if ns.CritLog.mode == "fight" then
-		add(ns.L.THIS_FIGHT, entry.left, nil, nil, nil, "hit")
-		add(ns.L.BEST_FIGHT, entry.right, nil, nil, nil, "crit")
-	elseif ns.CritLog.mode == "healing" then
+	if ns.CritLog.mode == "healing" then
 		add(ns.L.BEST_HEAL_CRIT, entry.left, entry.prevCrit, entry.critTarget, entry.critTime, "critHeal")
 		add(ns.L.BEST_HEAL, entry.right, entry.prevHit, entry.hitTarget, entry.hitTime, "heal")
 	else
@@ -389,17 +345,10 @@ function ns.CritLog.Refresh()
 	end
 	content:SetHeight(math.max(#entries * 30, 1))
 	ns.CritLog.empty:SetShown(#entries == 0)
-	if ns.CritLog.mode == "fight" then
-		ns.CritLog.empty:SetText(ns.L.EMPTY_FIGHT)
-	else
-		ns.CritLog.empty:SetText(ns.L.EMPTY_LOG)
-	end
+	ns.CritLog.empty:SetText(ns.L.EMPTY_LOG)
 
 	local L = ns.L
-	if ns.CritLog.mode == "fight" then
-		ns.CritLog.leftHeader:SetText(L.THIS_FIGHT)
-		ns.CritLog.rightHeader:SetText(L.BEST_FIGHT)
-	elseif ns.CritLog.mode == "healing" then
+	if ns.CritLog.mode == "healing" then
 		ns.CritLog.leftHeader:SetText(L.BEST_HEAL_CRIT)
 		ns.CritLog.rightHeader:SetText(L.BEST_HEAL)
 	else
@@ -419,9 +368,6 @@ function ns.CritLog.Refresh()
 		status = status .. "  " .. string.format(L.HIDDEN_HITS, ns.Recorder.hidden)
 	end
 	ns.CritLog.status:SetText(status)
-	ns.CritLog.fightToggle:SetShown(ns.CritLog.mode == "fight")
-	local side = ns.CritLog.fightSide == "heal" and L.HEAL or L.DAMAGE
-	ns.CritLog.fightToggle:SetText(side)
 end
 
 function ns.CritLog.SetSort(key)
@@ -536,7 +482,6 @@ function ns.CritLog.Init()
 	end
 	addTab("damage", ns.L.TAB_DAMAGE, 10)
 	addTab("healing", ns.L.TAB_HEALING, 124)
-	addTab("fight", ns.L.TAB_FIGHT, 238)
 
 	local search = CreateFrame("EditBox", "CritMaticForeverSearch", frame, "InputBoxTemplate")
 	search:SetAutoFocus(false)
@@ -552,15 +497,6 @@ function ns.CritLog.Init()
 	local searchLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	searchLabel:SetPoint("LEFT", search, "RIGHT", 8, 0)
 	searchLabel:SetText(ns.L.SEARCH)
-
-	local fightToggle = CreateFrame("Button", "CritMaticForeverFightToggle", frame, "UIPanelButtonTemplate")
-	fightToggle:SetSize(110, 20)
-	fightToggle:SetPoint("TOPRIGHT", -28, -60)
-	fightToggle:SetScript("OnClick", function()
-		ns.CritLog.fightSide = ns.CritLog.fightSide == "heal" and "damage" or "heal"
-		ns.CritLog.Refresh()
-	end)
-	ns.CritLog.fightToggle = fightToggle
 
 	local spellHeader = HeaderButton(frame, ns.L.SPELL, 160, "LEFT", function()
 		ns.CritLog.SetSort("name")

@@ -3,7 +3,7 @@ local _, ns = ...
 ns.Tooltips = {}
 
 local function BucketHasNumbers(bucket)
-	return type(bucket) == "table" and ((bucket.crit or 0) > 0 or (bucket.hit or 0) > 0 or (bucket.fight or 0) > 0)
+	return type(bucket) == "table" and ((bucket.crit or 0) > 0 or (bucket.hit or 0) > 0)
 end
 
 local function RecordHasNumbers(record)
@@ -30,11 +30,9 @@ local function AddRecord(tooltip, record, prefix, critKey, hitKey, heal)
 	if heal then
 		line(ns.L.BEST_HEAL_CRIT, bucket.crit, "critHeal")
 		line(ns.L.BEST_HEAL, bucket.hit, "heal")
-		line(ns.L.HEAL .. " " .. ns.L.BEST_FIGHT, bucket.fight, "title")
 	else
 		line(ns.L.BEST_CRIT, bucket.crit, critKey)
 		line(ns.L.BEST_HIT, bucket.hit, hitKey)
-		line(ns.L.BEST_FIGHT, bucket.fight, "title")
 	end
 	return wrote
 end

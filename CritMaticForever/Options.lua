@@ -5,6 +5,7 @@ ns.Options = {}
 local SOUND_ORDER = { "none", "raid", "ready", "level", "quest" }
 local pages = {}
 local ignoreButtons = {}
+local scrollOffset = 0
 
 local function SoundLabel(key)
 	local labels = {
@@ -50,7 +51,8 @@ local function Checkbox(page, key, text, onChanged)
 	box:SetChecked(ns.Database.Get(key) and true or false)
 	local label = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	label:SetPoint("LEFT", box, "RIGHT", 4, 0)
-	label:SetPoint("RIGHT", -8, 0)
+	label:SetWidth(430)
+	label:SetJustifyH("LEFT")
 	label:SetJustifyH("LEFT")
 	label:SetText(text)
 	box:SetScript("OnClick", function(self)
@@ -211,8 +213,12 @@ function ns.Options.RefreshIgnore()
 		entries[#entries + 1] = { kind = "target", name = name }
 	end
 	if #entries == 0 then
+		page.extra = 0
 		page.empty:SetText(ns.L.NO_IGNORES)
 		page.empty:Show()
+		if page:IsShown() then
+			ns.Options.AnchorPage(page)
+		end
 		return
 	end
 	page.empty:Hide()
@@ -239,8 +245,9 @@ function ns.Options.RefreshIgnore()
 		end)
 		button:Show()
 	end
-	if ns.Options.content and page:IsShown() then
-		ns.Options.content:SetHeight(math.max((page.height or 0) + #entries * 24, 400))
+	page.extra = #entries * 24
+	if page:IsShown() then
+		ns.Options.AnchorPage(page)
 	end
 end
 
@@ -269,26 +276,60 @@ function ns.Options.RefreshStatus()
 	if ns.Recorder.hidden and ns.Recorder.hidden > 0 then
 		lines[#lines + 1] = string.format(ns.L.HIDDEN_HITS, ns.Recorder.hidden)
 	end
-	if not C_DamageMeter then
-		lines[#lines + 1] = ns.L.METER_UNAVAILABLE
-	elseif ns.Recorder.session.secret then
-		lines[#lines + 1] = ns.L.METER_SECRET
-	elseif ns.Recorder.session.updated then
-		lines[#lines + 1] = ns.L.METER_READY
-	end
 	page.status:SetText(table.concat(lines, "\n"))
 end
 
+function ns.Options.AnchorPage(page)
+	local content = ns.Options.content
+	if not page or not content then
+		return
+	end
+	local width = content:GetWidth()
+	if type(width) ~= "number" or width < 20 then
+		width = 480
+	end
+	local height = (page.height or 0) + (page.extra or 0)
+	if height < 1 then
+		height = 1
+	end
+	page:ClearAllPoints()
+	page:SetPoint("TOPLEFT", content, "TOPLEFT", 0, scrollOffset)
+	page:SetSize(width, height)
+end
+
+function ns.Options.ScrollBy(delta)
+	local content = ns.Options.content
+	local page = pages[ns.Options.pageName]
+	if not content or not page or type(delta) ~= "number" then
+		return
+	end
+	local view = content:GetHeight()
+	if type(view) ~= "number" or view < 1 then
+		view = 1
+	end
+	local total = (page.height or 0) + (page.extra or 0)
+	local maxScroll = total - view
+	if maxScroll < 0 then
+		maxScroll = 0
+	end
+	scrollOffset = scrollOffset - delta * 40
+	if scrollOffset < 0 then
+		scrollOffset = 0
+	elseif scrollOffset > maxScroll then
+		scrollOffset = maxScroll
+	end
+	ns.Options.AnchorPage(page)
+end
+
 function ns.Options.ShowPage(name)
+	ns.Options.pageName = name
+	scrollOffset = 0
 	for key, page in pairs(pages) do
 		page:SetShown(key == name)
 	end
 	local page = pages[name]
-	if page and ns.Options.content then
-		ns.Options.content:SetHeight(math.max(page.height or 400, 400))
-		if ns.Options.scroll then
-			ns.Options.scroll:SetVerticalScroll(0)
-		end
+	if page then
+		ns.Options.AnchorPage(page)
 	end
 	if name == "ignore" then
 		ns.Options.RefreshIgnore()
@@ -382,26 +423,28 @@ function ns.Options.Init()
 		ns.Options.tabButtons[info[1]] = button
 	end
 
-	local scroll = CreateFrame("ScrollFrame", nil, frame)
-	scroll:SetPoint("TOPLEFT", 12, -66)
-	scroll:SetPoint("BOTTOMRIGHT", -16, 12)
-	scroll:EnableMouseWheel(true)
-	scroll:SetScript("OnMouseWheel", function(self, delta)
-		local nextScroll = self:GetVerticalScroll() - delta * 40
-		if nextScroll < 0 then
-			nextScroll = 0
-		end
-		local maxScroll = self:GetVerticalScrollRange()
-		if nextScroll > maxScroll then
-			nextScroll = maxScroll
-		end
-		self:SetVerticalScroll(nextScroll)
+	-- A ScrollFrame scroll child built while this window is hidden never paints on
+	-- Forever, so the tabs showed and the page stayed blank. Clip a plain frame instead.
+	local content = CreateFrame("Frame", nil, frame)
+	content:SetPoint("TOPLEFT", 12, -66)
+	content:SetPoint("BOTTOMRIGHT", -16, 12)
+	if content.SetClipsChildren then
+		content:SetClipsChildren(true)
+	end
+	content:SetFrameLevel(frame:GetFrameLevel() + 20)
+	content:EnableMouseWheel(true)
+	content:SetScript("OnMouseWheel", function(_, delta)
+		ns.Options.ScrollBy(delta)
 	end)
-	local content = CreateFrame("Frame", nil, scroll)
-	content:SetSize(480, 800)
-	scroll:SetScrollChild(content)
-	ns.Options.scroll = scroll
 	ns.Options.content = content
+	frame:EnableMouseWheel(true)
+	frame:SetScript("OnMouseWheel", function(_, delta)
+		ns.Options.ScrollBy(delta)
+	end)
+	frame:SetScript("OnShow", function()
+		content:SetFrameLevel(frame:GetFrameLevel() + 20)
+		ns.Options.ShowPage(ns.Options.pageName or "general")
+	end)
 
 	local general = MakePage(content)
 	pages.general = general
@@ -411,7 +454,6 @@ function ns.Options.Init()
 	Checkbox(general, "trackCrit", ns.L.TRACK_CRITS)
 	Checkbox(general, "trackHit", ns.L.TRACK_HITS)
 	Checkbox(general, "trackPet", ns.L.TRACK_PETS)
-	Checkbox(general, "trackFight", ns.L.TRACK_FIGHT)
 	Checkbox(general, "countOverheal", ns.L.COUNT_OVERHEAL)
 	Checkbox(general, "tooltip", ns.L.TOOLTIP)
 	Checkbox(general, "tooltipEmpty", ns.L.TOOLTIP_EMPTY)
@@ -452,7 +494,6 @@ function ns.Options.Init()
 	pages.alerts = alerts
 	Section(alerts, ns.L.ALERTS)
 	Checkbox(alerts, "alert", ns.L.ALERT_ENABLE)
-	Checkbox(alerts, "alertFight", ns.L.ALERT_FIGHT)
 	Checkbox(alerts, "lockAlert", ns.L.LOCK_ALERT)
 	Slider(alerts, "alertSize", ns.L.ALERT_SIZE, 12, 32, 1)
 	Slider(alerts, "alertHold", ns.L.ALERT_HOLD, 1, 8, 1)
@@ -489,6 +530,9 @@ function ns.Options.Init()
 	pages.social = social
 	Section(social, ns.L.SOCIAL)
 	Checkbox(social, "chat", ns.L.CHAT)
+	Checkbox(social, "shareParty", ns.L.SHARE_PARTY_OPT)
+	Checkbox(social, "shareGuild", ns.L.SHARE_GUILD_OPT)
+	Checkbox(social, "shareRaid", ns.L.SHARE_RAID_OPT)
 	Checkbox(social, "chatSummary", ns.L.CHAT_SUMMARY)
 	Slider(social, "summaryLimit", ns.L.SUMMARY_LIMIT, 1, 8, 1)
 	Checkbox(social, "lockLog", ns.L.LOCK_LOG)

@@ -126,34 +126,6 @@ local _, tiny = Logic.ApplyHit(Logic.NewBucket(), {
 }, { minimumAmount = 100 })
 eq(tiny, nil, "below minimum")
 
-local fightBucket = Logic.NewBucket()
-local _, firstFight = Logic.ApplyFightTotal(fightBucket, 8000, 20, "damage")
-truthy(firstFight.silent, "first fight total is quiet")
-eq(fightBucket.fight, 8000, "first fight stored")
-local _, secondFight = Logic.ApplyFightTotal(fightBucket, 7999, 30, "damage")
-eq(secondFight, nil, "smaller fight ignored")
-local _, thirdFight = Logic.ApplyFightTotal(fightBucket, 9000, 40, "damage")
-eq(thirdFight.silent, false, "beating a fight total announces")
-eq(thirdFight.previous, 8000, "fight previous")
-eq(fightBucket.fight, 9000, "fight best")
-
--- One fight read several times: only the first beating read announces, and the
--- previous best stays the pre-fight value.
-local sameFight = Logic.NewBucket()
-Logic.ApplyFightTotal(sameFight, 5000, 1, "damage", "f1")
-local _, beat = Logic.ApplyFightTotal(sameFight, 6000, 2, "damage", "f2")
-eq(beat.silent, false, "new fight beats best")
-eq(beat.previous, 5000, "new fight previous")
-local _, again = Logic.ApplyFightTotal(sameFight, 6400, 3, "damage", "f2")
-eq(again, nil, "same fight re-read is quiet")
-eq(sameFight.fight, 6400, "same fight raises total")
-eq(sameFight.prevFight, 5000, "same fight keeps pre-fight previous")
-local _, lowerSame = Logic.ApplyFightTotal(sameFight, 6100, 4, "damage", "f2")
-eq(lowerSame, nil, "same fight lower read ignored")
-eq(sameFight.fight, 6400, "same fight total not lowered")
-local _, nextFight = Logic.ApplyFightTotal(sameFight, 7000, 5, "damage", "f3")
-eq(nextFight.previous, 6400, "next fight compares to full total")
-
 -- Combat Log tab lines.
 local claw = Logic.ParseCombatLine("Your Claw hit Saltstone Crystalhide 252 Physical. (Critical) ")
 eq(claw.kind, "damage", "line damage kind")

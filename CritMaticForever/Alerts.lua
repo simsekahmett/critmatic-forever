@@ -4,35 +4,14 @@ ns.Alerts = {}
 
 local pool = {}
 local active = {}
-local GAP = 4
-local MIN_WIDTH = 220
-local MAX_WIDTH = 560
+local GAP = 6
 local lastSound = 0
-local measure
 
--- Height follows the text size, so a 32 pt alert does not spill out of a 40 px bar.
-local function BarHeight(size)
-	return math.max(40, math.floor(size + 22 + 0.5))
+local function TextHeight(size)
+	return math.floor(size + 8 + 0.5)
 end
 
--- The alert's own text is anchored left and right, so its GetStringWidth is capped by
--- the bar's current width. A pooled bar could then never grow past its last width.
--- Measure on a free font string instead.
-local function TextWidth(text, font, size, flags)
-	if not measure then
-		local holder = CreateFrame("Frame", nil, UIParent)
-		holder:Hide()
-		measure = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-		measure:SetPoint("LEFT")
-		measure:SetWordWrap(false)
-	end
-	measure:SetFont(font, size, flags)
-	measure:SetText(text)
-	local width = measure.GetUnboundedStringWidth and measure:GetUnboundedStringWidth() or measure:GetStringWidth()
-	return width or 180
-end
-
--- Offset of a bar from the top of the stack: sum of the bars above it.
+-- Offset of a line from the top of the stack: sum of the lines above it.
 local function StackOffset(index)
 	local offset = 0
 	for above = 1, index - 1 do
@@ -73,23 +52,20 @@ function ns.Alerts.Place()
 end
 
 local function CreateAlert()
-	local frame = CreateFrame("Frame", ns.WidgetName("Alert"), UIParent, "BackdropTemplate")
-	frame:SetSize(280, 40)
+	local frame = CreateFrame("Frame", ns.WidgetName("Alert"), UIParent)
+	frame:SetSize(20, 24)
 	frame:SetFrameStrata("HIGH")
 	frame:SetClampedToScreen(true)
+	if frame.SetClipsChildren then
+		frame:SetClipsChildren(false)
+	end
 	frame:EnableMouse(true)
 	frame:SetMovable(true)
 	frame:RegisterForDrag("LeftButton")
-	ns.ApplyBackdrop(frame, 0.07, 0.05, 0.05, 0.92)
-
-	frame.icon = frame:CreateTexture(nil, "ARTWORK")
-	frame.icon:SetSize(28, 28)
-	frame.icon:SetPoint("LEFT", 8, 0)
 
 	frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	frame.text:SetPoint("LEFT", frame.icon, "RIGHT", 8, 0)
-	frame.text:SetPoint("RIGHT", -10, 0)
-	frame.text:SetJustifyH("LEFT")
+	frame.text:SetPoint("CENTER")
+	frame.text:SetJustifyH("CENTER")
 	frame.text:SetWordWrap(false)
 
 	local fade = frame:CreateAnimationGroup()
@@ -149,21 +125,47 @@ function ns.Alerts.Play(key, force)
 	end
 end
 
-local function ColoredText(payload)
-	local spellR, spellG, spellB = ns.Database.Color("spell")
-	local valueR, valueG, valueB = ns.Database.Color(payload.colorKey or "crit")
-	local text = string.format(
-		"|cff%s%s|r  |cff%s%s %s|r",
-		ns.Logic.HexColor(spellR, spellG, spellB),
-		payload.name or "?",
-		ns.Logic.HexColor(valueR, valueG, valueB),
-		payload.label or "",
-		payload.amount or ""
-	)
-	if payload.previous then
-		text = text .. "  |cff9a9a9a(" .. payload.previous .. ")|r"
+local function ShowPrevious(payload)
+	if ns.ValueIsSecret(payload.secretPrevious) then
+		return payload.secretPrevious
 	end
-	return text
+	if type(payload.previous) == "number" and payload.previous > 0 then
+		return payload.previous
+	end
+	if type(payload.previous) == "string" and payload.previous ~= "" then
+		return payload.previous
+	end
+	return nil
+end
+
+local function WriteLine(fontstring, payload)
+	local spellHex = ns.Logic.HexColor(ns.Database.Color("spell"))
+	local valueHex = ns.Logic.HexColor(ns.Database.Color(payload.colorKey or "crit"))
+	local name = payload.name or "?"
+	local label = payload.label or ""
+	local amount = payload.secretAmount
+	if amount == nil then
+		amount = payload.amount or ""
+	end
+	local previous = ShowPrevious(payload)
+	local body
+	if payload.critFeed then
+		body = ns.FormatLine("|cff" .. spellHex .. "★ %s|r |cff" .. valueHex .. "crit %s|r", name, amount)
+		previous = nil
+	else
+		body = ns.FormatLine("|cff" .. valueHex .. "%s:|r |cff" .. spellHex .. "%s|r — %s", label, name, amount)
+	end
+	local wrote = false
+	if previous ~= nil and body ~= nil then
+		local suffix = ns.FormatLine("|cff9a9a9a" .. (ns.L.CHAT_PREVIOUS or "(previous %s)") .. "|r", previous)
+		wrote = suffix ~= nil and pcall(fontstring.SetFormattedText, fontstring, "%s %s", body, suffix)
+	end
+	if not wrote and body ~= nil then
+		wrote = pcall(fontstring.SetFormattedText, fontstring, "%s", body)
+	end
+	if not wrote then
+		pcall(fontstring.SetText, fontstring, name)
+	end
 end
 
 function ns.Alerts.Show(payload, forceSound)
@@ -182,22 +184,24 @@ function ns.Alerts.Show(payload, forceSound)
 	local font, _, flags = GameFontNormal:GetFont()
 	local size = ns.Database.Get("alertSize") or 18
 	flags = flags or "OUTLINE"
-	local text = ColoredText(payload)
-	local height = BarHeight(size)
-	local iconSize = height - 12
-	frame.icon:SetSize(iconSize, iconSize)
+	local height = TextHeight(size)
+	frame.text:ClearAllPoints()
+	frame.text:SetPoint("CENTER")
 	frame.text:SetFont(font, size, flags)
-	frame.text:SetText(text)
-	-- 8 left pad + icon + 8 gap + text + 10 right pad.
-	local chrome = 8 + iconSize + 8 + 10
-	local width = TextWidth(text, font, size, flags) + chrome + 2
-	frame:SetSize(math.max(MIN_WIDTH, math.min(MAX_WIDTH, width)), height)
-
-	if payload.icon then
-		frame.icon:SetTexture(payload.icon)
-	else
-		frame.icon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+	frame.text:SetJustifyH("CENTER")
+	frame.text:SetWordWrap(false)
+	WriteLine(frame.text, payload)
+	local width = 32
+	local widthOk, measured = pcall(function()
+		if frame.text.GetUnboundedStringWidth then
+			return frame.text:GetUnboundedStringWidth()
+		end
+		return frame.text:GetStringWidth()
+	end)
+	if widthOk and type(measured) == "number" and not ns.ValueIsSecret(measured) and measured > 1 then
+		width = measured + 8
 	end
+	frame:SetSize(width, height)
 
 	frame.fadeAnim:SetStartDelay(ns.Database.Get("alertHold") or 4)
 	frame.fade:Stop()

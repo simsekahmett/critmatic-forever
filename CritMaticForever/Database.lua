@@ -23,8 +23,6 @@ function ns.Database.DefaultSettings()
 		trackCrit = true,
 		trackHit = true,
 		trackPet = true,
-		trackFight = true,
-		alertFight = false,
 		countOverheal = true,
 		minimumAmount = 0,
 		tooltip = true,
@@ -45,6 +43,9 @@ function ns.Database.DefaultSettings()
 		soundThrottle = 2,
 		chat = true,
 		chatSummary = true,
+		shareParty = false,
+		shareGuild = false,
+		shareRaid = false,
 		summaryLimit = 3,
 		attemptCombatLog = false,
 		colors = {
@@ -80,12 +81,6 @@ function ns.Database.Init()
 		minimapAngle = 210,
 	})
 	Merge(ns.account.settings, ns.Database.DefaultSettings())
-	-- Single hits now come from the Combat Log tab. A fight total announced as a
-	-- "new best" reads like a single hit, so that announcement starts off once.
-	if not ns.account.fightAlertDefaulted then
-		ns.account.fightAlertDefaulted = true
-		ns.account.settings.alertFight = false
-	end
 
 	-- Until the character is known, records go to a scratch table that BindCharacter
 	-- folds into the real slot.
@@ -266,6 +261,14 @@ end
 
 function ns.Database.ResetRecords()
 	ns.char.records = {}
+	if ns.Recorder then
+		ns.Recorder.secretBest = nil
+		ns.Recorder.plainBest = nil
+		ns.Recorder.combatBest = nil
+		ns.Recorder.seen = nil
+		ns.Recorder.toSave = nil
+		ns.Recorder.announced = nil
+	end
 end
 
 function ns.Database.IsIgnoredSpell(spellID, spellName)
@@ -354,7 +357,7 @@ function ns.Database.RecordCount()
 			if type(bucket) ~= "table" then
 				return false
 			end
-			return (bucket.crit or 0) > 0 or (bucket.hit or 0) > 0 or (bucket.fight or 0) > 0
+			return (bucket.crit or 0) > 0 or (bucket.hit or 0) > 0
 		end
 		if type(record) == "table" and (used(record.damage) or used(record.heal)) then
 			count = count + 1

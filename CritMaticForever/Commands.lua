@@ -11,19 +11,16 @@ local function ListNames(title, list)
 end
 
 function ns.Commands.Demo()
-	local amount = ns.FormatNumber(1523)
-	local previous = ns.FormatNumber(1100)
+	local amount = ns.FormatNumber(224)
 	ns.Alerts.Show({
-		name = "Fireball",
-		label = ns.L.NEW_CRIT,
+		name = "Claw",
+		critFeed = true,
 		amount = amount,
-		previous = previous,
 		colorKey = "crit",
 		sound = ns.Database.Get("soundCrit"),
-		chat = string.format(ns.L.CHAT_RECORD_PREV, ns.L.NEW_CRIT, "Fireball", amount, previous),
 	}, true)
 	if ns.Database.Get("chat") then
-		ns.Print(string.format(ns.L.CHAT_RECORD_PREV, ns.L.NEW_CRIT, "Fireball", amount, previous))
+		ns.Print(string.format(ns.L.CRIT_LINE, "Claw", amount))
 	end
 end
 
@@ -45,13 +42,6 @@ function ns.Commands.Status()
 	end
 	if ns.Recorder.hidden and ns.Recorder.hidden > 0 then
 		ns.Print(string.format(ns.L.HIDDEN_HITS, ns.Recorder.hidden))
-	end
-	if ns.Recorder.session.secret then
-		ns.Print(ns.L.METER_SECRET)
-	elseif ns.Recorder.session.updated then
-		ns.Print(ns.L.METER_READY)
-	elseif not C_DamageMeter then
-		ns.Print(ns.L.METER_UNAVAILABLE)
 	end
 end
 
