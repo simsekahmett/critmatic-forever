@@ -320,7 +320,7 @@ local function TellOnce(key, label, raw)
 		return
 	end
 	ns.Recorder.told[key] = true
-	ns.Print(label .. " " .. tostring(raw):gsub("|", "||"))
+	ns.Print(label .. " " .. ns.Logic.VisibleBytes(raw))
 end
 
 local function ApplyLine(raw)
@@ -412,6 +412,17 @@ function ns.Recorder.ReadCombatLogTab(done)
 			ns.Recorder.logTabHits = applied
 			ns.Recorder.logTabLines = #raws
 			ns.Recorder.logTabNew = #raws - start + 1
+			-- New lines but none understood: show the newest raw line once, byte for byte.
+			if ns.Recorder.logTabNew > 0 and (ns.Recorder.logTabParsed or 0) == 0 then
+				local sample = raws[#raws]
+				for index = #raws, start, -1 do
+					if raws[index]:find("hit", 1, true) then
+						sample = raws[index]
+						break
+					end
+				end
+				TellOnce("raw", ns.L.LOGTAB_UNPARSED, sample)
+			end
 			-- Session totals, so a quiet last read does not hide earlier ones.
 			ns.Recorder.logTabTotal = (ns.Recorder.logTabTotal or 0) + applied
 			ns.Recorder.logTabRead = ns.Now()

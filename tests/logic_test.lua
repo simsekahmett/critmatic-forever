@@ -191,6 +191,10 @@ eq(named and named.isCrit, true, "named color crit")
 local textured = Logic.ParseCombatLine("|TInterface\\Icons\\Claw:0|tYour Claw hit Boar 50 Physical.")
 eq(textured and textured.amount, 50, "texture code stripped")
 
+local nbsp = Logic.ParseCombatLine("Your\194\160Claw\194\160hit\194\160Boar\194\16077\194\160Physical. (Critical)")
+eq(nbsp and nbsp.amount, 77, "no-break spaces")
+eq(Logic.VisibleBytes("a|cb\194\160"), "a||cb<C2><A0>", "visible bytes")
+
 eq(Logic.ParseCombatLine("You killed Saltstone Crystalhide."), nil, "kill line ignored")
 eq(Logic.ParseCombatLine("Scorpid Terror dies, you gain 197 experience."), nil, "xp line ignored")
 

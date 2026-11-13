@@ -306,6 +306,10 @@ function Logic.CleanCombatLine(text)
 		return nil
 	end
 	local clean = text
+		-- No-break and narrow spaces (U+00A0, U+202F, U+2009) count as plain spaces.
+		:gsub("\194\160", " ")
+		:gsub("\226\128\175", " ")
+		:gsub("\226\128\137", " ")
 		:gsub("|T.-|t", "")
 		:gsub("|A.-|a", "")
 		:gsub("|K.-|k", "")
@@ -319,6 +323,17 @@ function Logic.CleanCombatLine(text)
 		:gsub("^ ", "")
 		:gsub(" $", "")
 	return clean
+end
+
+-- A line as plain ASCII: escape codes shown as ||, other bytes as <XX>. For reports.
+function Logic.VisibleBytes(text)
+	if type(text) ~= "string" then
+		return tostring(text)
+	end
+	local shown = text:gsub("|", "||"):gsub("[\128-\255]", function(char)
+		return string.format("<%02X>", char:byte())
+	end)
+	return shown
 end
 
 local function ToNumber(digits)
