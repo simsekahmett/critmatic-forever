@@ -39,7 +39,7 @@ function ns.Commands.Status()
 		ns.Print(ns.L.STATUS_CLEU_OFF)
 	end
 	if ns.Recorder.logTabRead then
-		ns.Print(string.format(ns.L.LOGTAB_READ, ns.Recorder.logTabHits or 0))
+		ns.Print(ns.Recorder.LogTabStatus())
 	elseif not ns.Recorder.CombatLogFrame() then
 		ns.Print(ns.L.LOGTAB_MISSING)
 	end

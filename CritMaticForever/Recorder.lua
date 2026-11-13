@@ -271,6 +271,14 @@ end
 
 -- Combat Log tab --------------------------------------------------------------
 
+function ns.Recorder.LogTabStatus()
+	if not ns.Recorder.logTabRead then
+		return nil
+	end
+	return string.format(ns.L.LOGTAB_READ, ns.Recorder.logTabLines or 0, ns.Recorder.logTabNew or 0,
+		ns.Recorder.logTabParsed or 0, ns.Recorder.logTabTotal or 0)
+end
+
 local TAIL_SIZE = 4
 
 function ns.Recorder.CombatLogFrame()
@@ -304,14 +312,31 @@ local function SpellFromName(name)
 	return nil
 end
 
+-- Shows a line with its escape codes visible, once per kind of problem, so a line
+-- format this parser does not know can be reported and fixed.
+local function TellOnce(key, label, raw)
+	ns.Recorder.told = ns.Recorder.told or {}
+	if ns.Recorder.told[key] then
+		return
+	end
+	ns.Recorder.told[key] = true
+	ns.Print(label .. " " .. tostring(raw):gsub("|", "||"))
+end
+
 local function ApplyLine(raw)
 	local parsed = ns.Logic.ParseCombatLine(raw)
 	if not parsed then
+		local clean = ns.Logic.CleanCombatLine(raw) or ""
+		if clean:find("^Your ") and (clean:find(" hit ", 1, true) or clean:find(" healed ", 1, true)) then
+			TellOnce("parse", ns.L.LOGTAB_UNPARSED, raw)
+		end
 		return false
 	end
+	ns.Recorder.logTabParsed = (ns.Recorder.logTabParsed or 0) + 1
 	local spellID = parsed.spellID or SpellFromName(parsed.spellName)
 	if not spellID then
 		ns.Recorder.unresolved = (ns.Recorder.unresolved or 0) + 1
+		TellOnce("spell:" .. tostring(parsed.spellName), ns.L.LOGTAB_UNKNOWN_SPELL, parsed.spellName)
 		return false
 	end
 	local name, icon = ns.SpellInfo(spellID)
@@ -374,7 +399,9 @@ function ns.Recorder.ReadCombatLogTab(done)
 				end
 			end
 			local applied = 0
-			for index = ns.Logic.ResumeIndex(cleaned, ns.Recorder.logTail), #raws do
+			local start = ns.Logic.ResumeIndex(cleaned, ns.Recorder.logTail)
+			ns.Recorder.logTabParsed = 0
+			for index = start, #raws do
 				if ApplyLine(raws[index]) then
 					applied = applied + 1
 				end
@@ -383,6 +410,10 @@ function ns.Recorder.ReadCombatLogTab(done)
 				ns.Recorder.logTail = ns.Logic.Tail(cleaned, TAIL_SIZE)
 			end
 			ns.Recorder.logTabHits = applied
+			ns.Recorder.logTabLines = #raws
+			ns.Recorder.logTabNew = #raws - start + 1
+			-- Session totals, so a quiet last read does not hide earlier ones.
+			ns.Recorder.logTabTotal = (ns.Recorder.logTabTotal or 0) + applied
 			ns.Recorder.logTabRead = ns.Now()
 		end)
 		if ns.CritLog and ns.CritLog.IsShown and ns.CritLog.IsShown() then

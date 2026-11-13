@@ -306,6 +306,10 @@ function Logic.CleanCombatLine(text)
 		return nil
 	end
 	local clean = text
+		:gsub("|T.-|t", "")
+		:gsub("|A.-|a", "")
+		:gsub("|K.-|k", "")
+		:gsub("|cn[^:|]*:", "")
 		:gsub("|c%x%x%x%x%x%x%x%x", "")
 		:gsub("|r", "")
 		:gsub("|H.-|h", "")

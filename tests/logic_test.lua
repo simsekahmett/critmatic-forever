@@ -185,6 +185,12 @@ eq(linked.spellName, "Claw", "link stripped from name")
 eq(linked.target, "Boar", "unit link stripped")
 eq(linked.amount, 1234, "grouped digits")
 
+local named = Logic.ParseCombatLine("Your Claw |cnGRAY_FONT_COLOR:hit|r Boar 93 |cnWHITE_FONT_COLOR:Physical|r. (Critical)")
+eq(named and named.amount, 93, "named color codes stripped")
+eq(named and named.isCrit, true, "named color crit")
+local textured = Logic.ParseCombatLine("|TInterface\\Icons\\Claw:0|tYour Claw hit Boar 50 Physical.")
+eq(textured and textured.amount, 50, "texture code stripped")
+
 eq(Logic.ParseCombatLine("You killed Saltstone Crystalhide."), nil, "kill line ignored")
 eq(Logic.ParseCombatLine("Scorpid Terror dies, you gain 197 experience."), nil, "xp line ignored")
 
