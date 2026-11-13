@@ -251,6 +251,7 @@ function ns.Options.RefreshStatus()
 	end
 	local lines = {
 		string.format(ns.L.VERSION, ns.version or ns.AddonVersion()),
+		string.format(ns.L.CHARACTER, ns.charKey or "?"),
 		string.format(ns.L.RECORD_COUNT, ns.Database.RecordCount()),
 	}
 	if ns.Recorder.combatLogEnabled then

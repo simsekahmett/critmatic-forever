@@ -275,15 +275,16 @@ local function EnsureRow(index, parent)
 	row.icon = row:CreateTexture(nil, "ARTWORK")
 	row.icon:SetSize(24, 24)
 	row.icon:SetPoint("LEFT", 6, 0)
-	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-	row.name:SetWidth(200)
-	row.name:SetJustifyH("LEFT")
-	row.name:SetWordWrap(false)
 	row.leftText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	row.leftText:SetPoint("RIGHT", row, "RIGHT", -86, 0)
 	row.leftText:SetWidth(78)
 	row.leftText:SetJustifyH("RIGHT")
+	-- The name takes whatever the number columns leave, at any window width.
+	row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+	row.name:SetPoint("RIGHT", row.leftText, "LEFT", -6, 0)
+	row.name:SetJustifyH("LEFT")
+	row.name:SetWordWrap(false)
 	row.rightText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	row.rightText:SetPoint("RIGHT", -8, 0)
 	row.rightText:SetWidth(78)
@@ -480,6 +481,9 @@ function ns.CritLog.Init()
 	frame:EnableMouse(true)
 	if frame.SetResizeBounds then
 		frame:SetResizeBounds(380, 260, 860, 720)
+	elseif frame.SetMinResize then
+		frame:SetMinResize(380, 260)
+		frame:SetMaxResize(860, 720)
 	end
 	ns.ApplyBackdrop(frame, 0.05, 0.045, 0.06, 0.96)
 	ns.Database.ApplySize(frame, "log", 520, 420)
@@ -640,6 +644,12 @@ function ns.CritLog.Init()
 
 	frame:SetScript("OnShow", function()
 		ns.CritLog.SetMode(ns.CritLog.mode)
+	end)
+	-- Rows take the scroll width only in Refresh, so follow live resizing too.
+	frame:SetScript("OnSizeChanged", function(self)
+		if self:IsShown() then
+			ns.CritLog.Refresh()
+		end
 	end)
 	ns.CritLog.SetMode("damage")
 end

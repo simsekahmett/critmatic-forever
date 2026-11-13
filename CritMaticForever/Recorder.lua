@@ -149,7 +149,15 @@ function ns.Recorder.FlushPending()
 	for index = 1, #queued do
 		ns.Recorder.Emit(queued[index])
 	end
-	ns.Recorder.PrintSummary()
+end
+
+local fightSerial = 0
+
+-- Unique across reloads, because the id is saved on the bucket that holds the best.
+function ns.Recorder.NewFightID(prefix)
+	fightSerial = fightSerial + 1
+	ns.Recorder.fightID = (prefix or "fight") .. ":" .. tostring(ns.Now()) .. ":" .. tostring(fightSerial)
+	return ns.Recorder.fightID
 end
 
 local function ResolveSpell(described)
@@ -306,7 +314,7 @@ local function ConsumeSource(into, source, isPet, kind)
 				}
 				if not ns.Database.IsIgnoredSpell(spellID, name) and ns.Database.Get("trackFight") then
 					local record = ns.Database.EnsureRecord(spellID, isPet, name, icon)
-					local _, outcome = ns.Logic.ApplyFightTotal(BucketFor(record, kind), total, ns.Now(), kind)
+					local _, outcome = ns.Logic.ApplyFightTotal(BucketFor(record, kind), total, ns.Now(), kind, ns.Recorder.fightID)
 					ns.Recorder.Celebrate(record, outcome)
 				end
 			end
@@ -318,29 +326,28 @@ local function ConsumeSource(into, source, isPet, kind)
 	return true, readable
 end
 
--- Current is the live pull. Expired is the fight that just ended. Try both.
+-- Current is the live pull. Expired is the fight that just ended. Expired is only a
+-- fallback for an empty Current. When Current is still hidden, stop and let the caller
+-- retry: falling through would save an older fight's totals as this fight and end
+-- the retries before the real numbers unlock.
 local function ReadSource(into, kind, isPet, guid)
 	if type(guid) ~= "string" or ns.ValueIsSecret(guid) then
 		return false
 	end
 	local meterType = MeterType(kind)
-	local sawSecret = false
 	for _, sessionType in ipairs(SessionCandidates()) do
 		local ok, source = pcall(C_DamageMeter.GetCombatSessionSourceFromType, sessionType, meterType, guid)
 		if ok then
-			local readableBefore = 0
-			for _ in pairs(into) do
-				readableBefore = readableBefore + 1
-			end
 			local allowed, added = ConsumeSource(into, source, isPet, kind)
 			if not allowed then
-				sawSecret = true
-			elseif added > 0 or readableBefore > 0 then
+				return false
+			end
+			if added > 0 then
 				return true
 			end
 		end
 	end
-	return not sawSecret
+	return true
 end
 
 function ns.Recorder.ReadMeter()
@@ -385,19 +392,46 @@ function ns.Recorder.ReadMeter()
 	end
 end
 
-function ns.Recorder.ScheduleMeterRead()
+-- Every meter event used to start its own retry chain. Only the newest chain runs now.
+-- withSummary prints the end-of-fight summary after the fight totals are read, so the
+-- fight bests found by that read are part of it.
+local readSerial = 0
+
+function ns.Recorder.ScheduleMeterRead(withSummary)
+	readSerial = readSerial + 1
+	local serial = readSerial
+	if withSummary then
+		ns.Recorder.summaryPending = true
+	end
 	local tries = 0
+	local function finish()
+		if ns.Recorder.summaryPending then
+			ns.Recorder.summaryPending = false
+			ns.Recorder.PrintSummary()
+		end
+	end
 	local function tick()
+		if serial ~= readSerial then
+			return
+		end
+		if ns.Recorder.inCombat then
+			-- A new pull started. That fight schedules its own read when it ends.
+			ns.Recorder.summaryPending = false
+			return
+		end
 		tries = tries + 1
 		local ok = ns.Guard("DamageMeter", ns.Recorder.ReadMeter)
 		if (not ok or ns.Recorder.session.secret) and tries < 8 and C_Timer and C_Timer.After then
 			C_Timer.After(0.4, tick)
+			return
 		end
+		finish()
 	end
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.3, tick)
 	else
 		ns.Guard("DamageMeter", ns.Recorder.ReadMeter)
+		finish()
 	end
 end
 
@@ -432,10 +466,11 @@ function ns.Recorder.Init()
 			ns.Recorder.inCombat = true
 			ns.Recorder.pending = {}
 			ns.Recorder.fightFeed = {}
+			ns.Recorder.NewFightID("fight")
 		elseif event == "PLAYER_REGEN_ENABLED" then
 			ns.Recorder.inCombat = false
 			ns.Recorder.FlushPending()
-			ns.Recorder.ScheduleMeterRead()
+			ns.Recorder.ScheduleMeterRead(true)
 		elseif not ns.Recorder.inCombat then
 			ns.Recorder.ScheduleMeterRead()
 		end
@@ -451,7 +486,11 @@ function ns.Recorder.OnLogin()
 		ns.Print(ns.L.WELCOME)
 		ns.char.welcomed = true
 	end
-	if not InCombatLockdown or not InCombatLockdown() then
+	-- A /reload inside combat skips PLAYER_REGEN_DISABLED, so take the state from the client.
+	ns.Recorder.inCombat = (InCombatLockdown and InCombatLockdown()) and true or false
+	-- Whatever the meter holds at login belongs to one earlier fight.
+	ns.Recorder.NewFightID("login")
+	if not ns.Recorder.inCombat then
 		ns.Recorder.ScheduleMeterRead()
 	end
 end

@@ -29,6 +29,7 @@ end
 
 function ns.Commands.Status()
 	ns.Print(string.format(ns.L.VERSION, ns.version or "?"))
+	ns.Print(string.format(ns.L.CHARACTER, ns.charKey or "?"))
 	ns.Print(string.format(ns.L.RECORD_COUNT, ns.Database.RecordCount()))
 	if ns.Recorder.combatLogEnabled then
 		ns.Print(ns.L.STATUS_CLEU_ON)

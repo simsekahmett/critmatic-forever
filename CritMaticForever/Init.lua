@@ -23,6 +23,10 @@ frame:SetScript("OnEvent", function(_, event, name)
 			ns.Options.ShowChangelog()
 		end
 	elseif event == "PLAYER_LOGIN" then
+		ns.Database.BindCharacter()
+		if ns.CritLog.IsShown and ns.CritLog.IsShown() then
+			ns.CritLog.Refresh()
+		end
 		ns.Recorder.OnLogin()
 	end
 end)

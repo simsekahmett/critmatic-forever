@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fight bests: when the current meter session was still hidden, the addon fell back to the older Expired session, saved that fight's totals and stopped retrying. It now waits for the real numbers.
+- Fight bests: one fight read several times no longer announces more than once or overwrites the previous best with a partial total of the same fight.
+- The end-of-fight summary now runs after the damage meter read, so it includes the fight bests.
+- Records are stored per "Name-Realm" in the account file. Existing per-character records are imported once. `/cmf status` shows which character the records belong to.
+- Alert bar: width is measured from the full text, so a reused bar can grow again. Height, icon and stacking follow the text size.
+- Record window: the spell name column follows the window width, and rows update while resizing.
+
 ## 1.0.0
 
 - First Forever release for interface 16001.

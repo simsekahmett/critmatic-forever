@@ -258,7 +258,11 @@ function Logic.ApplyHit(bucket, event, settings)
 	}
 end
 
-function Logic.ApplyFightTotal(bucket, total, now, kind)
+-- fightID names the fight the total came from. The meter is read several times for
+-- one fight (retries, session updates, DoT ticks after combat). A later, larger read
+-- of the same fight raises the stored total but keeps the pre-fight best as previous
+-- and does not announce again.
+function Logic.ApplyFightTotal(bucket, total, now, kind, fightID)
 	if type(bucket) ~= "table" then
 		bucket = Logic.NewBucket()
 	end
@@ -266,12 +270,20 @@ function Logic.ApplyFightTotal(bucket, total, now, kind)
 		return bucket, nil
 	end
 	local previous = bucket.fight or 0
+	if fightID ~= nil and bucket.fightID == fightID then
+		if total > previous then
+			bucket.fight = total
+			bucket.fightTime = now
+		end
+		return bucket, nil
+	end
 	if total <= previous then
 		return bucket, nil
 	end
 	bucket.prevFight = previous
 	bucket.fight = total
 	bucket.fightTime = now
+	bucket.fightID = fightID
 	return bucket, {
 		field = "fight",
 		kind = kind or "damage",

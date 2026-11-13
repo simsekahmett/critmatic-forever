@@ -4,8 +4,43 @@ ns.Alerts = {}
 
 local pool = {}
 local active = {}
-local ROW = 44
+local GAP = 4
+local MIN_WIDTH = 220
+local MAX_WIDTH = 560
 local lastSound = 0
+local measure
+
+-- Height follows the text size, so a 32 pt alert does not spill out of a 40 px bar.
+local function BarHeight(size)
+	return math.max(40, math.floor(size + 22 + 0.5))
+end
+
+-- The alert's own text is anchored left and right, so its GetStringWidth is capped by
+-- the bar's current width. A pooled bar could then never grow past its last width.
+-- Measure on a free font string instead.
+local function TextWidth(text, font, size, flags)
+	if not measure then
+		local holder = CreateFrame("Frame", nil, UIParent)
+		holder:Hide()
+		measure = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+		measure:SetPoint("LEFT")
+		measure:SetWordWrap(false)
+	end
+	measure:SetFont(font, size, flags)
+	measure:SetText(text)
+	local width = measure.GetUnboundedStringWidth and measure:GetUnboundedStringWidth() or measure:GetStringWidth()
+	return width or 180
+end
+
+-- Offset of a bar from the top of the stack: sum of the bars above it.
+local function StackOffset(index)
+	local offset = 0
+	for above = 1, index - 1 do
+		local frame = active[above]
+		offset = offset + (frame and frame:GetHeight() or 40) + GAP
+	end
+	return offset
+end
 
 local function Release(frame)
 	frame:Hide()
@@ -29,7 +64,7 @@ local function Place()
 	for index, frame in ipairs(active) do
 		frame.stackIndex = index
 		frame:ClearAllPoints()
-		frame:SetPoint(point, UIParent, relative, x, y - (index - 1) * ROW)
+		frame:SetPoint(point, UIParent, relative, x, y - StackOffset(index))
 	end
 end
 
@@ -84,7 +119,7 @@ local function CreateAlert()
 			point = point,
 			relativePoint = relativePoint or point,
 			x = xOfs or 0,
-			y = (yOfs or 0) + (index - 1) * ROW,
+			y = (yOfs or 0) + StackOffset(index),
 		}
 		Place()
 	end)
@@ -146,10 +181,17 @@ function ns.Alerts.Show(payload, forceSound)
 
 	local font, _, flags = GameFontNormal:GetFont()
 	local size = ns.Database.Get("alertSize") or 18
-	frame.text:SetFont(font, size, flags or "OUTLINE")
-	frame.text:SetText(ColoredText(payload))
-	local width = frame.text:GetStringWidth() or 180
-	frame:SetWidth(math.max(220, math.min(560, width + 58)))
+	flags = flags or "OUTLINE"
+	local text = ColoredText(payload)
+	local height = BarHeight(size)
+	local iconSize = height - 12
+	frame.icon:SetSize(iconSize, iconSize)
+	frame.text:SetFont(font, size, flags)
+	frame.text:SetText(text)
+	-- 8 left pad + icon + 8 gap + text + 10 right pad.
+	local chrome = 8 + iconSize + 8 + 10
+	local width = TextWidth(text, font, size, flags) + chrome + 2
+	frame:SetSize(math.max(MIN_WIDTH, math.min(MAX_WIDTH, width)), height)
 
 	if payload.icon then
 		frame.icon:SetTexture(payload.icon)

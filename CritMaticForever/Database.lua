@@ -68,7 +68,6 @@ function ns.Database.Init()
 		CritMaticForeverCharDB = {}
 	end
 	ns.account = CritMaticForeverDB
-	ns.char = CritMaticForeverCharDB
 
 	Merge(ns.account, {
 		settings = {},
@@ -77,15 +76,89 @@ function ns.Database.Init()
 		ignoredSpells = {},
 		ignoredSpellIDs = {},
 		ignoredTargets = {},
+		characters = {},
 		minimapAngle = 210,
 	})
 	Merge(ns.account.settings, ns.Database.DefaultSettings())
-	if type(ns.char.records) ~= "table" then
-		ns.char.records = {}
+
+	-- Until the character is known, records go to a scratch table that BindCharacter
+	-- folds into the real slot.
+	ns.char = { records = {}, welcomed = true, scratch = true }
+	ns.charKey = nil
+	ns.Database.BindCharacter()
+end
+
+-- Records live in the account file under an explicit "Name-Realm" key, so two
+-- characters with the same name on different realms never share a slot and the
+-- slot does not depend on which per-character file the client loads.
+local function CharacterKey()
+	local name = type(UnitName) == "function" and UnitName("player") or nil
+	local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+	if type(name) ~= "string" or name == "" or (UNKNOWNOBJECT and name == UNKNOWNOBJECT) then
+		return nil
 	end
-	if ns.char.welcomed == nil then
-		ns.char.welcomed = false
+	if type(realm) ~= "string" or realm == "" then
+		return nil
 	end
+	if ns.ValueIsSecret and (ns.ValueIsSecret(name) or ns.ValueIsSecret(realm)) then
+		return nil
+	end
+	return name .. "-" .. realm, name, realm
+end
+
+local function MergeRecords(into, from)
+	if type(from) ~= "table" then
+		return
+	end
+	for key, record in pairs(from) do
+		if into[key] == nil and type(record) == "table" then
+			into[key] = record
+		end
+	end
+end
+
+function ns.Database.BindCharacter()
+	local key, name, realm = CharacterKey()
+	if not key then
+		return false
+	end
+	if ns.charKey == key then
+		return true
+	end
+	local characters = ns.account.characters
+	local slot = characters[key]
+	if type(slot) ~= "table" then
+		slot = {}
+		characters[key] = slot
+	end
+	if type(slot.records) ~= "table" then
+		slot.records = {}
+	end
+	slot.name = name
+	slot.realm = realm
+
+	-- One-time import from the old per-character file. It is left in place so an
+	-- older build still finds its data.
+	local legacy = CritMaticForeverCharDB
+	if type(legacy) == "table" and not legacy.migratedTo then
+		MergeRecords(slot.records, legacy.records)
+		if legacy.welcomed then
+			slot.welcomed = true
+		end
+		legacy.migratedTo = key
+	end
+
+	-- Anything recorded before the name was known.
+	if ns.char and ns.char.scratch then
+		MergeRecords(slot.records, ns.char.records)
+	end
+	if slot.welcomed == nil then
+		slot.welcomed = false
+	end
+
+	ns.char = slot
+	ns.charKey = key
+	return true
 end
 
 function ns.Database.Get(key)
